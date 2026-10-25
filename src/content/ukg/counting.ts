@@ -54,7 +54,7 @@ const numberName: Template = r => {
     prompt: `Tap the number ${NUMBER_NAMES[n - 1]}.`,
     options: numOptions(r, n, 1, 10, 3),
     answers: [String(n)],
-    hint: "Count on your fingers to that word.",
+    hint: `Count on your fingers up to ${NUMBER_NAMES[n - 1]}.`,
     explanation: `"${NUMBER_NAMES[n - 1]}" is written ${n}.`,
     reason: `${n} is ${NUMBER_NAMES[n - 1]}.`,
     working: { kind: "number-word", word: NUMBER_NAMES[n - 1] },

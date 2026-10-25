@@ -3,13 +3,15 @@
  * DPDP Act). The version is stored with the consent, so a change to the
  * wording needs a new version, and parents are asked again.
  */
-export const CONSENT_VERSION = "2026-10-25";
+export const CONSENT_VERSION = "2026-10-25.2";
 
 export const CONSENT_POINTS = [
   "Nitya keeps only what you enter for each child: a nickname, an avatar, their class, board and language, and their quiz answers and progress.",
+  "Why: to pick the right next question for each child and to show you their progress. Nothing else.",
   "It is stored in Nitya's database in Mumbai, India, so it comes back when you sign in on another device.",
   "Nitya has no ads, no chat, no trackers and no links out of the app, and never sells or shares your child's data.",
-  "You can download or delete a child's data at any time from Grown-ups.",
+  "You can download or delete a child's data at any time from Grown-ups. To withdraw consent, delete each child and sign out.",
+  "Questions or complaints go to Nitya's grievance officer, named in the full notice.",
 ];
 
 export const CONSENT_AGREEMENT = "I am the parent or legal guardian of the children I add, and I agree to Nitya keeping their data as described above.";
