@@ -1,0 +1,620 @@
+<title>Nitya Quiz Preview</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: class dashboard as home; lesson, quiz and result in one big card; a grown-up panel beside the quiz */
+:root {
+  --sky: #eef5ff;
+  --card: #ffffff;
+  --ink: #1d2b4f;
+  --muted: #5b6889;
+  --blue: #2f6fe4;
+  --blue-ink: #ffffff;
+  --blue-soft: #e4eeff;
+  --sun: #ffc93c;
+  --leaf: #1f9a66;
+  --leaf-soft: #e2f5eb;
+  --coral: #e0703f;
+  --coral-soft: #fdeee7;
+  --line: #d6e3f5;
+  --track: #e8eef8;
+  --dot-blue: #3b7bf0;
+  --dot-orange: #f08a3c;
+  --font-display: "Baloo 2", "Comic Sans MS", system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sky: #0f1a2e; --card: #17233b; --ink: #eef3ff; --muted: #a4b1cf; --blue: #6f9bff; --blue-ink: #0f1a2e; --blue-soft: #1e2f52;
+    --sun: #ffd25e; --leaf: #4fd39a; --leaf-soft: #173b2e; --coral: #ff9a76; --coral-soft: #3d2620; --line: #2a3a5c; --track: #22314f;
+    --dot-blue: #7aa5ff; --dot-orange: #ffa766; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --sky: #0f1a2e; --card: #17233b; --ink: #eef3ff; --muted: #a4b1cf; --blue: #6f9bff; --blue-ink: #0f1a2e; --blue-soft: #1e2f52;
+  --sun: #ffd25e; --leaf: #4fd39a; --leaf-soft: #173b2e; --coral: #ff9a76; --coral-soft: #3d2620; --line: #2a3a5c; --track: #22314f;
+  --dot-blue: #7aa5ff; --dot-orange: #ffa766; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--sky); color: var(--ink); font-family: var(--font-body); font-size: 18px; line-height: 1.5; }
+.wrap {
+  max-width: 1040px; margin: 0 auto; padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 18px;
+}
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; }
+.tag { font-size: 0.85rem; color: var(--muted); }
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 18px; align-items: start; }
+.stage.solo { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 780px) { .stage { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 2px solid var(--line); border-radius: 24px; padding: clamp(18px, 4vw, 32px); display: grid; gap: 18px; min-width: 0; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 800; margin: 0; line-height: 1.15; text-wrap: balance; }
+h1 { font-size: clamp(1.7rem, 5vw, 2.3rem); }
+h2 { font-size: clamp(1.4rem, 4.2vw, 1.9rem); }
+h3 { font-size: 1.15rem; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 0.9rem; }
+.label { font-size: 0.75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.mascot { display: flex; gap: 14px; align-items: flex-start; }
+.mascot svg { flex: none; }
+.bubble { background: var(--sky); border-radius: 18px; padding: 12px 16px; min-width: 0; display: grid; gap: 6px; }
+.prompt { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.3rem, 4vw, 1.8rem); line-height: 1.25; }
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.btn {
+  font-family: var(--font-display); font-weight: 800; font-size: 1.45rem; min-height: 72px; padding: 8px 16px;
+  border-radius: 18px; border: 3px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer;
+  transition: transform .12s, border-color .12s;
+}
+.btn:hover { border-color: var(--blue); transform: translateY(-2px); }
+.btn:focus-visible, .ghost:focus-visible, .chipbtn:focus-visible { outline: 4px solid var(--sun); outline-offset: 2px; }
+.btn[disabled] { cursor: default; transform: none; opacity: .55; }
+.btn.right { border-color: var(--leaf); background: var(--leaf-soft); opacity: 1; }
+.btn.tried { border-color: var(--coral); background: var(--coral-soft); }
+.primary { background: var(--blue); border-color: var(--blue); color: var(--blue-ink); font-size: 1.25rem; min-height: 60px; }
+.primary:hover { border-color: var(--blue); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.ghost { font-family: var(--font-body); font-weight: 700; font-size: 1rem; min-height: 48px; padding: 0 16px; border-radius: 14px; border: 2px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+.feedback { border-radius: 18px; padding: 14px 18px; font-size: 1.05rem; }
+.feedback.good { background: var(--leaf-soft); }
+.feedback.gentle { background: var(--coral-soft); }
+.feedback b { font-family: var(--font-display); font-size: 1.25rem; }
+.visual { display: flex; justify-content: center; }
+.visual svg { max-width: 100%; height: auto; }
+
+/* Marks bar */
+.marks { display: grid; gap: 8px; padding: 14px 16px; border-radius: 18px; background: var(--sky); }
+.marks-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.marks-num { font-family: var(--font-display); font-weight: 800; font-size: 1.6rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.delta { display: inline-block; margin-left: 8px; font-weight: 700; font-size: 1rem; padding: 2px 10px; border-radius: 999px; }
+.delta.up { background: var(--leaf-soft); color: var(--leaf); }
+.delta.down { background: var(--coral-soft); color: var(--coral); }
+.track { position: relative; height: 22px; border-radius: 999px; background: var(--track); margin-top: 18px; }
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--blue); transition: width .6s cubic-bezier(.3, 1.4, .5, 1), background .3s; }
+.fill.qualified { background: var(--leaf); }
+.passmark { position: absolute; top: -20px; bottom: -6px; width: 0; border-left: 3px dashed var(--ink); }
+.passmark span { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 0.8rem; font-weight: 700; background: var(--card); border: 2px solid var(--ink); border-radius: 999px; padding: 0 8px; line-height: 1.4; }
+.passmark.crossed { border-left-color: var(--leaf); }
+.passmark.crossed span { border-color: var(--leaf); color: var(--leaf); }
+.qual { font-weight: 700; font-size: 0.95rem; }
+.qual.yes { color: var(--leaf); }
+.lvl { display: inline-flex; gap: 6px; align-items: center; font-size: 0.85rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--blue-soft); color: var(--ink); }
+.lvl i { font-style: normal; color: var(--muted); font-weight: 400; }
+
+/* Grown-up panel */
+.side { background: var(--card); border: 2px dashed var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 12px; font-size: 0.95rem; }
+.ladder { display: grid; gap: 6px; }
+.rung { display: flex; justify-content: space-between; padding: 7px 12px; border-radius: 10px; border: 2px solid var(--line); font-variant-numeric: tabular-nums; }
+.rung.on { border-color: var(--blue); background: var(--blue-soft); font-weight: 700; }
+.stat { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.tools { display: grid; gap: 8px; padding-top: 10px; border-top: 2px dashed var(--line); }
+.tools .ghost { min-height: 40px; font-size: 0.9rem; }
+
+/* Dashboard */
+.dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.overall { display: grid; gap: 8px; }
+.segs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.seg { height: 12px; border-radius: 999px; background: var(--track); }
+.seg.cleared { background: var(--leaf); }
+.seg.current { background: var(--blue); }
+.bigstat { font-family: var(--font-display); font-weight: 800; font-size: 1.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.topics { display: grid; gap: 10px; }
+.topic { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 18px; border: 2px solid var(--line); }
+.topic.current { border-color: var(--blue); background: var(--blue-soft); }
+.topic.locked { opacity: .6; }
+.num { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; font-size: 1.1rem; background: var(--track); }
+.topic.cleared .num { background: var(--leaf); color: var(--card); }
+.topic.current .num { background: var(--blue); color: var(--blue-ink); }
+.tmain { display: grid; gap: 6px; min-width: 0; }
+.tmeta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 0.88rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip { font-size: 0.78rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; border: 2px solid var(--line); color: var(--muted); }
+.chip.cleared { border-color: var(--leaf); color: var(--leaf); }
+.chip.current { border-color: var(--blue); color: var(--blue); }
+.mini { position: relative; width: 120px; height: 8px; border-radius: 999px; background: var(--track); }
+.mini b { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--blue); }
+.mini b.ok { background: var(--leaf); }
+.mini i { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--ink); }
+.stars-sm { color: var(--sun); letter-spacing: .05em; }
+.chipbtn { font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; min-height: 48px; padding: 0 18px; border-radius: 14px; border: 2px solid var(--blue); background: var(--blue); color: var(--blue-ink); cursor: pointer; }
+.chipbtn.soft { background: transparent; color: var(--ink); border-color: var(--line); }
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.panel { border: 2px solid var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.area { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+.area .mini { width: 100%; grid-column: 1 / -1; }
+.lvlrow { display: grid; grid-template-columns: 110px minmax(0, 1fr) 48px; gap: 10px; align-items: center; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.lvlrow .mini { width: 100%; }
+.stars { font-family: var(--font-display); font-size: 3rem; color: var(--sun); letter-spacing: .1em; line-height: 1; }
+.cert { border: 3px solid var(--sun); border-radius: 24px; padding: 24px; text-align: center; display: grid; gap: 10px; justify-items: center; }
+@media (max-width: 520px) {
+  .topic { grid-template-columns: 40px minmax(0, 1fr); }
+  .topic .act { grid-column: 1 / -1; }
+  .topic .act .chipbtn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .btn, .fill { transition: none; } .btn:hover { transform: none; } }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="brand">
+      <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="var(--blue)"/><text x="20" y="27" text-anchor="middle" font-family="Baloo 2, sans-serif" font-weight="800" font-size="20" fill="var(--blue-ink)">+</text></svg>
+      Nitya
+    </div>
+    <span class="tag">Preview · UKG · 5 topics</span>
+  </div>
+  <div class="stage" id="stage">
+    <main class="card" id="screen" aria-live="polite"></main>
+    <aside class="side" id="side" aria-label="Grown-up view"></aside>
+  </div>
+</div>
+
+<script>/*ENGINE*/</script>
+<script>
+const M = Nitya;
+const TOPICS = M.UKG_TOPICS;
+const TOPIC_LIST = TOPICS.map(t => t.topic);
+const byId = id => TOPICS.find(t => t.topic.id === id);
+const CLASS_ID = "UKG";
+const MAX = M.maxMarks(CLASS_ID);
+const LEVEL_NAMES = { 1: "Easy", 2: "Medium", 3: "Hard", 4: "Olympiad" };
+const PRACTICE_LENGTH = 8;
+const STORE_KEY = "nitya-ukg-v1";
+const screen = document.getElementById("screen");
+const side = document.getElementById("side");
+const stage = document.getElementById("stage");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+const MASCOT = `<svg width="60" height="60" viewBox="0 0 64 64" aria-hidden="true">
+  <ellipse cx="32" cy="36" rx="24" ry="24" fill="var(--sun)"/>
+  <circle cx="23" cy="30" r="8" fill="var(--card)"/><circle cx="41" cy="30" r="8" fill="var(--card)"/>
+  <circle cx="24" cy="31" r="4" fill="var(--ink)"/><circle cx="40" cy="31" r="4" fill="var(--ink)"/>
+  <path d="M28 41 L32 46 L36 41 Z" fill="var(--coral)"/>
+  <path d="M16 19 Q23 14 29 19 M35 19 Q41 14 48 19" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M26 50 Q32 54 38 50" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/></svg>`;
+
+/* ---------- saved progress (this browser only) ---------- */
+function freshSave() {
+  return { progress: M.startClass(CLASS_ID, TOPIC_LIST), seen: {}, stars: {}, skills: {}, levels: {}, history: [], promoted: false };
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && s.progress && TOPIC_LIST.every(t => s.progress.topics[t.id])) return s;
+    }
+  } catch (e) {}
+  return freshSave();
+}
+function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch (e) {} }
+let db = load();
+
+function noteAnswer(q, right) {
+  const k = q.topicId + "|" + q.subSkill;
+  const s = db.skills[k] || (db.skills[k] = { right: 0, total: 0 });
+  s.total++; if (right) s.right++;
+  const l = db.levels[q.level] || (db.levels[q.level] = { right: 0, total: 0 });
+  l.total++; if (right) l.right++;
+}
+
+/* ---------- speech ---------- */
+function speak(text) {
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; speechSynthesis.speak(u); } catch (e) {}
+}
+const listenBtn = text => `<button class="ghost" type="button" data-say="${esc(text)}">Listen</button>`;
+screen.addEventListener("click", e => { const b = e.target.closest("[data-say]"); if (b) speak(b.dataset.say); });
+
+/* ---------- dots ---------- */
+function dotsSvg(visual) {
+  if (!visual) return "";
+  const R = 11, G = 6, STEP = 2 * R + G, GROUP_GAP = 30;
+  let x = 0, h = 0;
+  const parts = [];
+  visual.groups.forEach((g, gi) => {
+    const cols = Math.min(10, g.count), rows = Math.ceil(g.count / 10);
+    const fill = g.color === "blue" ? "var(--dot-blue)" : "var(--dot-orange)";
+    for (let i = 0; i < g.count; i++) {
+      const cx = x + R + (i % 10) * STEP, cy = R + Math.floor(i / 10) * STEP;
+      const crossed = g.crossed && i >= g.count - g.crossed;
+      parts.push(`<circle cx="${cx}" cy="${cy}" r="${R}" fill="${fill}" ${crossed ? 'fill-opacity="0.3"' : ""}/>`);
+      if (crossed) parts.push(`<path d="M${cx - 8} ${cy - 8}L${cx + 8} ${cy + 8}M${cx + 8} ${cy - 8}L${cx - 8} ${cy + 8}" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>`);
+    }
+    x += cols * STEP - G + (gi < visual.groups.length - 1 ? GROUP_GAP : 0);
+    h = Math.max(h, rows * STEP - G);
+  });
+  const label = visual.groups.map(g => `${g.count} ${g.color}${g.crossed ? `, ${g.crossed} crossed out` : ""}`).join(" and ");
+  return `<div class="visual"><svg width="${x}" height="${h}" viewBox="0 0 ${x} ${h}" role="img" aria-label="${label} dots">${parts.join("")}</svg></div>`;
+}
+
+/* ---------- app state ---------- */
+let app = { mode: "dash" };
+
+function goDash() { app = { mode: "dash" }; render(); }
+
+function openTopic(topicId) {
+  app = { mode: "lesson", topicId, page: 0 };
+  render();
+}
+
+function attemptNoFor(topicId) {
+  const e = db.progress.topics[topicId];
+  return e.state === "cleared" ? 1 : e.attempts + 1;
+}
+
+function startQuiz(topicId, practiceSkill) {
+  const content = byId(topicId);
+  const bank = practiceSkill ? content.bank.filter(q => q.subSkill === practiceSkill) : content.bank;
+  app = {
+    mode: "quiz", topicId, practiceSkill, bank, practiceTotal: Math.min(PRACTICE_LENGTH, bank.length),
+    state: M.startQuiz({ classId: CLASS_ID, topicId, attemptNo: attemptNoFor(topicId), seenBefore: db.seen[topicId] || [] }),
+    phase: "ask", feedback: null, prevMarks: 0, delta: null,
+  };
+  app.q = M.nextQuestion(app.state, app.bank);
+  render();
+}
+
+function quizDone() {
+  const s = app.state;
+  return app.practiceSkill ? s.asked.length >= app.practiceTotal && !s.pendingRetry : M.isFinished(s);
+}
+
+function nextQ() {
+  app.prevMarks = app.state.marks;
+  app.delta = null;
+  app.q = M.nextQuestion(app.state, app.bank);
+  app.phase = "ask";
+  app.feedback = null;
+  app.tried = null;
+  render();
+}
+
+function finish() {
+  const s = app.state;
+  db.seen[app.topicId] = [...(db.seen[app.topicId] || []).filter(id => !s.asked.includes(id)), ...s.asked];
+  if (app.practiceSkill) {
+    save();
+    app = { mode: "practice-done", topicId: app.topicId, skill: app.practiceSkill, correct: s.correct, total: s.asked.length };
+    render();
+    return;
+  }
+  const outcome = M.finishQuiz(s);
+  const r = M.recordAttempt(db.progress, TOPIC_LIST, app.topicId, outcome.marks, outcome.cleared);
+  db.progress = r.progress;
+  if (outcome.cleared) db.stars[app.topicId] = Math.max(db.stars[app.topicId] || 0, outcome.stars);
+  db.history.push({ topicId: app.topicId, marks: outcome.marks, cleared: outcome.cleared, at: Date.now() });
+  if (r.effect.kind === "promoted") db.promoted = true;
+  save();
+  app = { mode: "result", topicId: app.topicId, outcome, effect: r.effect };
+  render();
+}
+
+/* ---------- screens ---------- */
+function renderDash() {
+  const states = TOPIC_LIST.map(t => db.progress.topics[t.id]);
+  const clearedCount = states.filter(s => s.state === "cleared").length;
+  const totalStars = Object.values(db.stars).reduce((a, b) => a + b, 0);
+  const passPct = (M.PASS_MARKS / MAX) * 100;
+
+  const rows = TOPIC_LIST.map((t, i) => {
+    const e = db.progress.topics[t.id];
+    const stars = db.stars[t.id] || 0;
+    const bestPct = Math.min(100, (e.bestScore / MAX) * 100);
+    const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
+    const score = e.attempts
+      ? `<span>Best ${e.bestScore} / ${MAX}</span><span class="mini" aria-hidden="true"><b class="${e.bestScore >= M.PASS_MARKS ? "ok" : ""}" style="width:${bestPct}%"></b><i style="left:${passPct}%"></i></span><span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>${stars ? `<span class="stars-sm" aria-label="${stars} stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</span>` : ""}`
+      : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
+    const act = e.state === "current"
+      ? `<button class="chipbtn" type="button" data-open="${t.id}">${e.attempts ? "Try again" : "Start"}</button>`
+      : e.state === "cleared" ? `<button class="chipbtn soft" type="button" data-open="${t.id}">Practise</button>` : "";
+    return `<div class="topic ${e.state}">
+      <span class="num" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>
+      <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
+      <div class="act">${act}</div></div>`;
+  }).join("");
+
+  const areas = Object.entries(db.skills)
+    .map(([k, v]) => { const [tid, skill] = k.split("|"); return { tid, skill, acc: v.right / v.total, total: v.total }; })
+    .filter(a => a.total >= 2 && a.acc < 0.8)
+    .sort((a, b) => a.acc - b.acc)
+    .slice(0, 4);
+  const areasHtml = areas.length
+    ? areas.map(a => {
+        const c = byId(a.tid);
+        const open = db.progress.topics[a.tid].state !== "locked";
+        return `<div class="area"><div><b>${esc(c.subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(c.topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
+          ${open ? `<button class="ghost" type="button" data-practice="${a.tid}|${a.skill}">Practise</button>` : ""}
+          <span class="mini" aria-hidden="true"><b style="width:${a.acc * 100}%"></b></span></div>`;
+      }).join("")
+    : `<p class="muted small">Nothing to work on yet. After each quiz, skills under 80% show up here with a practice button.</p>`;
+
+  const levelsHtml = [1, 2, 3, 4].map(l => {
+    const v = db.levels[l];
+    const pct = v && v.total ? Math.round((v.right / v.total) * 100) : null;
+    return `<div class="lvlrow"><span>L${l} ${LEVEL_NAMES[l]}</span><span class="mini" aria-hidden="true"><b style="width:${pct ?? 0}%"></b></span><span>${pct === null ? "–" : pct + "%"}</span></div>`;
+  }).join("");
+
+  screen.innerHTML = `
+    <div class="dash-head">
+      <div style="display:grid;gap:4px"><span class="label">Class dashboard</span><h1>UKG Maths</h1></div>
+      <div class="row" style="gap:24px">
+        <div><div class="bigstat">${clearedCount} / ${TOPIC_LIST.length}</div><div class="small muted">topics cleared</div></div>
+        <div><div class="bigstat" style="color:var(--sun)">★ ${totalStars}</div><div class="small muted">stars</div></div>
+      </div>
+    </div>
+    <div class="overall">
+      <div class="segs" aria-label="${clearedCount} of ${TOPIC_LIST.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
+      <p class="small muted">${db.promoted ? "UKG complete! Class 1 opens in Phase 2." : `Clear every topic to move up to Class 1. Each quiz needs ${M.PASS_MARKS} of ${MAX} marks.`}</p>
+    </div>
+    <div class="topics">${rows}</div>
+    <div class="panels">
+      <div class="panel"><span class="label">Improvement areas</span>${areasHtml}</div>
+      <div class="panel"><span class="label">Right first time, by level</span>${levelsHtml}</div>
+    </div>`;
+  screen.querySelectorAll("[data-open]").forEach(b => b.onclick = () => openTopic(b.dataset.open));
+  screen.querySelectorAll("[data-practice]").forEach(b => b.onclick = () => { const [t, s] = b.dataset.practice.split("|"); startQuiz(t, s); });
+}
+
+function lockIcon() {
+  return `<svg width="16" height="18" viewBox="0 0 16 18" aria-label="Locked"><rect x="1" y="8" width="14" height="9" rx="2" fill="var(--muted)"/><path d="M4 8V5a4 4 0 0 1 8 0v3" fill="none" stroke="var(--muted)" stroke-width="2"/></svg>`;
+}
+
+function renderLesson() {
+  const c = byId(app.topicId);
+  const pages = c.lesson;
+  const n = pages.length + 1;
+  const crumbs = `<div class="row" style="justify-content:space-between"><span class="muted small">${esc(c.topic.title)} · Lesson ${Math.min(app.page + 1, n)} of ${n}</span>
+    ${app.peek ? `<button class="ghost" type="button" id="backq">Back to my question</button>` : `<button class="ghost" type="button" id="todash">Class map</button>`}</div>`;
+  if (app.page < pages.length) {
+    const p = pages[app.page];
+    screen.innerHTML = `${crumbs}
+      <div class="mascot">${MASCOT}<div class="bubble"><h2>${esc(p.title)}</h2><p>${esc(p.text)}</p></div></div>
+      ${dotsSvg(p.visual)}
+      <div class="row">${listenBtn(p.text)}
+        ${app.page > 0 ? `<button class="ghost" type="button" id="back">Back</button>` : ""}
+        <button class="btn primary" type="button" id="next">Next</button></div>`;
+    document.getElementById("next").onclick = () => { app.page++; render(); };
+    const back = document.getElementById("back");
+    if (back) back.onclick = () => { app.page--; render(); };
+  } else {
+    const t = c.tryIt;
+    screen.innerHTML = `${crumbs}
+      <div class="mascot">${MASCOT}<div class="bubble"><span class="label">Try it</span><p class="prompt">${esc(t.prompt)}</p></div></div>
+      ${dotsSvg(t.visual)}
+      <div class="opts">${t.options.map(o => `<button class="btn" type="button" data-try="${esc(o)}">${esc(o)}</button>`).join("")}</div>
+      <div id="tryfb"></div>
+      <div class="row">${listenBtn(t.prompt)}<button class="ghost" type="button" id="back">Back</button></div>`;
+    document.getElementById("back").onclick = () => { app.page--; render(); };
+    screen.querySelectorAll("[data-try]").forEach(b => b.onclick = () => {
+      const fb = document.getElementById("tryfb");
+      if (b.dataset.try === t.answer) {
+        b.classList.add("right");
+        fb.innerHTML = `<div class="feedback good"><b>You got it!</b> ${esc(t.praise)}</div>
+          <div class="row" style="margin-top:12px"><button class="btn primary" type="button" id="go">${app.peek ? "Back to my question" : "Start the quiz"}</button></div>`;
+        document.getElementById("go").onclick = () => app.peek ? backToQuiz() : startQuiz(app.topicId);
+      } else {
+        b.classList.add("tried");
+        fb.innerHTML = `<div class="feedback gentle"><b>Let's look again.</b> ${esc(t.help)} Try again!</div>`;
+      }
+    });
+  }
+  const td = document.getElementById("todash");
+  if (td) td.onclick = goDash;
+  const bq = document.getElementById("backq");
+  if (bq) bq.onclick = backToQuiz;
+}
+
+function backToQuiz() { app = app.saved; app.prevMarks = app.state.marks; render(); }
+
+function marksBar() {
+  const s = app.state;
+  const passPct = (M.PASS_MARKS / MAX) * 100;
+  const q = s.marks >= M.PASS_MARKS;
+  const d = app.delta;
+  const deltaHtml = d === null || d === undefined ? "" : d > 0 ? `<span class="delta up">+${d}</span>` : d < 0 ? `<span class="delta down">−${-d}</span>` : "";
+  return `<div class="marks">
+    <div class="marks-top">
+      <div><span class="label">Marks</span><div><span class="marks-num">${s.marks}</span>${deltaHtml}</div></div>
+      <span class="qual ${q ? "yes" : ""}">${q ? "Pass mark crossed! Keep going to the end." : `${M.PASS_MARKS - s.marks} more ${M.PASS_MARKS - s.marks === 1 ? "mark" : "marks"} to pass`}</span>
+    </div>
+    <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${MAX}" aria-valuenow="${s.marks}" aria-label="Marks">
+      <div class="fill ${q ? "qualified" : ""}" id="fill" style="width:${(Math.min(app.prevMarks, MAX) / MAX) * 100}%"></div>
+      <div class="passmark ${q ? "crossed" : ""}" style="left:${passPct}%"><span>${q ? "✓ " : ""}Pass ${M.PASS_MARKS}</span></div>
+    </div>
+    <div class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away 1.</div>
+  </div>`;
+}
+
+function renderQuiz() {
+  const { q, state: s } = app;
+  const practice = !!app.practiceSkill;
+  const total = practice ? app.practiceTotal : M.QUIZ_LENGTH;
+  const qNo = app.phase === "ask" ? s.asked.length + 1 : s.asked.length;
+  const locked = app.phase === "done";
+  const c = byId(app.topicId);
+  screen.innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(c.subSkillNames[app.practiceSkill])}` : ""} · Question ${qNo} of ${total}</span>
+      <button class="ghost" type="button" id="relesson">See the lesson</button></div>
+    ${practice ? "" : marksBar()}
+    <div class="mascot">${MASCOT}<div class="bubble"><span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span><p class="prompt">${esc(q.prompt)}</p></div></div>
+    ${dotsSvg(q.visual)}
+    <div class="opts">${q.options.map(o => `<button class="btn" type="button" data-opt="${esc(o)}" ${locked ? "disabled" : ""}>${esc(o)}</button>`).join("")}</div>
+    <div id="fb">${app.feedback ?? ""}</div>
+    <div class="row">${listenBtn(q.prompt)}${locked ? `<button class="btn primary" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button>` : ""}</div>`;
+
+  if (locked) screen.querySelectorAll("[data-opt]").forEach(b => { if (q.answers.includes(b.dataset.opt)) b.classList.add("right"); });
+  if (app.phase === "retry" && app.tried) {
+    const t = [...screen.querySelectorAll("[data-opt]")].find(b => b.dataset.opt === app.tried);
+    if (t) { t.classList.add("tried"); t.disabled = true; }
+  }
+  const fill = document.getElementById("fill");
+  if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = (Math.min(s.marks, MAX) / MAX) * 100 + "%"; }));
+
+  document.getElementById("relesson").onclick = () => { const saved = app; app = { mode: "lesson", topicId: saved.topicId, page: 0, peek: true, saved }; render(); };
+  const cont = document.getElementById("cont");
+  if (cont) cont.onclick = () => (quizDone() ? finish() : nextQ());
+  screen.querySelectorAll("[data-opt]:not([disabled])").forEach(b => b.onclick = () => answer(b.dataset.opt));
+}
+
+function answer(choice) {
+  const q = app.q;
+  app.prevMarks = app.state.marks;
+  if (app.phase === "ask") {
+    const r = M.answerFirstTry(app.state, q, choice);
+    app.state = r.state;
+    app.delta = r.result.marksDelta;
+    noteAnswer(q, r.result.kind === "praise");
+    save();
+    if (r.result.kind === "praise") {
+      app.phase = "done";
+      app.feedback = `<div class="feedback good"><b>${pick(["Super!", "Well done!", "Brilliant!", "Yes!"])}</b> ${esc(r.result.reason)}</div>`;
+    } else {
+      app.phase = "retry";
+      app.tried = choice;
+      app.feedback = `<div class="feedback gentle"><b>Nice try! Here's a hint.</b> ${esc(r.result.hint)} Have another go.</div>`;
+    }
+  } else if (app.phase === "retry") {
+    const r = M.answerRetry(app.state, q, choice);
+    app.state = r.state;
+    app.phase = "done";
+    app.feedback = r.retryCorrect
+      ? `<div class="feedback good"><b>You worked it out!</b> ${esc(r.explanation)}</div>`
+      : `<div class="feedback gentle"><b>Let's do it together.</b> ${esc(r.explanation)} The answer is <b>${esc(r.answer)}</b>.</div>`;
+  }
+  render();
+}
+
+function renderResult() {
+  const { outcome: o, effect } = app;
+  const c = byId(app.topicId);
+  const passPct = (M.PASS_MARKS / MAX) * 100;
+  const bar = `<div class="marks"><div class="marks-top"><div><span class="label">Final marks</span><div class="marks-num">${o.marks} / ${MAX}</div></div>
+      <span class="qual ${o.cleared ? "yes" : ""}">${o.cleared ? "Above the pass mark" : `${M.PASS_MARKS - o.marks} short of the pass mark`}</span></div>
+    <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>Pass ${M.PASS_MARKS}</span></div></div>
+    <div class="small muted">${o.correct} of ${M.QUIZ_LENGTH} right first time</div></div>`;
+
+  if (o.cleared && effect.kind === "promoted") {
+    screen.innerHTML = `
+      <div class="cert">${MASCOT}<span class="label">Certificate</span><h1>UKG Maths complete!</h1>
+        <p>You cleared all ${TOPIC_LIST.length} topics. You are ready for Class 1.</p>
+        <div class="stars" aria-label="${o.stars} stars">${"★".repeat(o.stars)}${"☆".repeat(3 - o.stars)}</div>
+        <p class="small muted">Class 1 opens in Phase 2 of this preview.</p></div>
+      ${bar}
+      <div class="row"><button class="btn primary" type="button" id="dash">See my UKG dashboard</button></div>`;
+  } else if (o.cleared) {
+    const next = byId(effect.topicId);
+    screen.innerHTML = `
+      <div class="mascot">${MASCOT}<div class="bubble"><h2>Topic cleared!</h2><p>${esc(c.topic.title)} is done. The next topic is open.</p></div></div>
+      <div class="stars" aria-label="${o.stars} stars">${"★".repeat(o.stars)}${"☆".repeat(3 - o.stars)}</div>
+      ${bar}
+      <div class="row">
+        <button class="btn primary" type="button" id="nexttopic">Next topic: ${esc(next.topic.title)}</button>
+        <button class="ghost" type="button" id="dash">Class map</button>
+        <button class="ghost" type="button" id="again">Play this one again</button>
+      </div>`;
+    document.getElementById("nexttopic").onclick = () => openTopic(next.topic.id);
+  } else {
+    const weak = o.weakSubSkills[0];
+    screen.innerHTML = `
+      <div class="mascot">${MASCOT}<div class="bubble"><h2>Almost there!</h2><p>You need ${M.PASS_MARKS} marks to open the next topic. Harder questions give more marks.</p></div></div>
+      ${bar}
+      <div class="row">
+        <button class="btn primary" type="button" id="lesson">Watch the lesson again</button>
+        <button class="ghost" type="button" id="again">Try with new questions</button>
+        ${o.offerPractice && weak ? `<button class="ghost" type="button" id="practice">Extra practice: ${esc(c.subSkillNames[weak] || weak)}</button>` : ""}
+        <button class="ghost" type="button" id="dash">Class map</button>
+      </div>`;
+    document.getElementById("lesson").onclick = () => openTopic(app.topicId);
+    const pr = document.getElementById("practice");
+    if (pr) pr.onclick = () => startQuiz(app.topicId, weak);
+  }
+  const again = document.getElementById("again");
+  if (again) again.onclick = () => startQuiz(app.topicId);
+  document.getElementById("dash").onclick = goDash;
+}
+
+function renderPracticeDone() {
+  const c = byId(app.topicId);
+  screen.innerHTML = `
+    <div class="mascot">${MASCOT}<div class="bubble"><h2>Practice done!</h2><p>You got ${app.correct} of ${app.total} on ${esc(c.subSkillNames[app.skill])}. Practice does not change your marks.</p></div></div>
+    <div class="row"><button class="btn primary" type="button" id="quiz">Try the quiz again</button><button class="ghost" type="button" id="dash">Class map</button></div>`;
+  document.getElementById("quiz").onclick = () => startQuiz(app.topicId);
+  document.getElementById("dash").onclick = goDash;
+}
+
+/* ---------- grown-up panel ---------- */
+function renderSide() {
+  if (app.mode !== "quiz") {
+    stage.classList.toggle("solo", app.mode !== "dash");
+    side.hidden = app.mode !== "dash";
+    side.innerHTML = `<span class="label">Tester tools (preview only)</span>
+      <p class="small muted">Progress is saved in this browser. Reset it to see a brand-new UKG class.</p>
+      <div class="tools"><button class="ghost" type="button" id="reset">Reset all progress</button></div>`;
+    const reset = document.getElementById("reset");
+    if (reset) reset.onclick = () => {
+      if (reset.dataset.sure) { db = freshSave(); save(); goDash(); }
+      else { reset.dataset.sure = "1"; reset.textContent = "Tap again to reset"; }
+    };
+    return;
+  }
+  stage.classList.remove("solo");
+  side.hidden = false;
+  const s = app.state;
+  const rungs = [4, 3, 2, 1].map(l => `<div class="rung ${s.level === l ? "on" : ""}"><span>L${l} ${LEVEL_NAMES[l]}</span><span>${s.responses.filter(r => r.level === l && r.firstTryCorrect).length}✓</span></div>`).join("");
+  side.innerHTML = `<span class="label">Grown-up view</span>
+    <span class="small muted">Highlighted: level of the next question</span>
+    <div class="ladder">${rungs}</div>
+    <div class="stat"><span>Marks</span><b>${s.marks} / ${MAX}</b></div>
+    <div class="stat"><span>Right first time</span><b>${s.correct} / ${s.asked.length}</b></div>
+    <div class="stat"><span>Attempt</span><b>${s.attemptNo}</b></div>
+    <div class="tools"><span class="label">Tester tools</span>
+      <button class="ghost" type="button" id="tright">Answer right</button>
+      <button class="ghost" type="button" id="twrong">Answer wrong</button></div>`;
+  const q = app.q;
+  const wrong = () => q.options.find(o => !q.answers.includes(o) && o !== app.tried) ?? q.options.find(o => !q.answers.includes(o));
+  document.getElementById("tright").onclick = () => tester(q.answers[0]);
+  document.getElementById("twrong").onclick = () => tester(wrong());
+}
+
+function tester(choice) {
+  if (app.phase === "done") { quizDone() ? finish() : nextQ(); return; }
+  answer(choice);
+  if (app.phase === "retry") answer(app.q.options.find(o => !app.q.answers.includes(o) && o !== app.tried) ?? choice);
+}
+
+function render() {
+  if (app.mode === "dash") renderDash();
+  else if (app.mode === "lesson") renderLesson();
+  else if (app.mode === "quiz") renderQuiz();
+  else if (app.mode === "result") renderResult();
+  else renderPracticeDone();
+  renderSide();
+  const view = app.mode + (app.topicId || "") + (app.page ?? "");
+  if (view !== lastView) { lastView = view; try { window.scrollTo(0, 0); } catch (e) {} }
+}
+let lastView = "";
+
+render();
+</script>
