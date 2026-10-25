@@ -1,8 +1,8 @@
 import { browserStorage } from "./accounts/browser-storage";
-import { localBackend } from "./accounts/local-backend";
+import { DEMO_KEY, demoBankKey, localBackend } from "./accounts/local-backend";
 
 export * from "./ui-exports";
-export { browserStorage };
+export { browserStorage, DEMO_KEY, demoBankKey };
 
 /** The preview always runs the demo: pretend sign-in, everything kept in this browser. */
 export const createBackend = () => localBackend(browserStorage());

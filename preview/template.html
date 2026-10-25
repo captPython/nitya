@@ -197,6 +197,42 @@ input:focus-visible { outline: 4px solid var(--sun); outline-offset: 2px; }
 .banner { background: var(--coral-soft); border-radius: 14px; padding: 10px 14px; font-weight: 700; }
 pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-radius: 12px; padding: 12px; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; }
 @media (max-width: 420px) { .choices.avatars { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* New questions, quiz settings and the admin panel */
+.act { display: grid; gap: 4px; justify-items: end; }
+.linkbtn { font: inherit; font-size: 0.88rem; font-weight: 700; min-height: 36px; padding: 0 6px; border: 0; background: none; color: var(--blue); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.linkbtn[disabled] { color: var(--muted); cursor: default; }
+.linkbtn:focus-visible { outline: 4px solid var(--sun); outline-offset: 2px; border-radius: 6px; }
+.settings { display: grid; gap: 12px; }
+.setting { border: 2px solid var(--line); border-radius: 18px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.setline { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.stepper { display: inline-flex; align-items: center; gap: 10px; }
+.stepper .ghost { min-width: 48px; padding: 0; font-size: 1.3rem; }
+.stepper .ghost[disabled] { opacity: .4; cursor: default; }
+.stepper b { min-width: 2.2ch; text-align: center; font-family: var(--font-display); font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.tabs .ghost.on { background: var(--blue-soft); border-color: var(--blue); }
+.qcard { border: 2px solid var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.optlist { display: flex; gap: 8px; flex-wrap: wrap; }
+.optlist span { min-width: 48px; text-align: center; padding: 4px 12px; border-radius: 12px; border: 2px solid var(--line); font-weight: 700; }
+.optlist span.ans { border-color: var(--leaf); background: var(--leaf-soft); }
+.problems { margin: 0; padding: 10px 14px 10px 32px; border-radius: 14px; background: var(--coral-soft); display: grid; gap: 4px; font-size: 0.95rem; }
+.nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.nums label { display: grid; gap: 4px; font-size: 0.85rem; }
+input[type="number"], select {
+  font: inherit; font-size: 1.05rem; font-weight: 400; min-height: 48px; padding: 0 12px; border-radius: 12px;
+  border: 2px solid var(--line); background: var(--card); color: var(--ink); width: 100%; min-width: 0;
+}
+select:focus-visible { outline: 4px solid var(--sun); outline-offset: 2px; }
+.log { display: grid; gap: 6px; font-size: 0.88rem; }
+.log > div { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 1.2fr); gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--sky); font-variant-numeric: tabular-nums; }
+.checks { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 0.95rem; }
+.checks .ok { color: var(--leaf); }
+.checks .bad { color: var(--coral); font-weight: 700; }
+@media (max-width: 520px) {
+  .topic .act { justify-items: stretch; }
+  .log > div { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
 @media (prefers-reduced-motion: reduce) { .btn, .fill { transition: none; } .btn:hover { transform: none; } }
 </style>
 

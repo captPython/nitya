@@ -90,13 +90,13 @@ describe("reference data", () => {
     ]);
   });
 
-  it("gives every topic a pass mark of 44 and a 1-mark penalty, with parent limits at the defaults", async () => {
+  it("gives every topic a pass mark of 44 and a 1-mark penalty, which parents may raise to 60 and 2", async () => {
     const { rows } = await db.query("select * from public.topic_settings");
     expect(rows).toHaveLength(5);
     for (const r of rows) {
       expect(r).toMatchObject({
-        pass_marks: 44, pass_marks_min: 44, pass_marks_max: 44,
-        wrong_penalty: 1, wrong_penalty_min: 1, wrong_penalty_max: 1,
+        pass_marks: 44, pass_marks_min: 44, pass_marks_max: 60,
+        wrong_penalty: 1, wrong_penalty_min: 1, wrong_penalty_max: 2,
       });
     }
   });
@@ -270,7 +270,7 @@ describe("settings", () => {
   it("refuses a parent's pass mark outside the admin's limits", async () => {
     await expect(as(db, PARENT_A, q =>
       q.query("insert into public.profile_topic_settings (profile_id, topic_id, pass_marks) values ($1, $2, 40)", [child, TOPIC]),
-    )).rejects.toThrow(/outside the allowed 44 to 44/);
+    )).rejects.toThrow(/outside the allowed 44 to 60/);
   });
 
   it("uses the parent's value inside the limits, and clamps it when the admin narrows them", async () => {

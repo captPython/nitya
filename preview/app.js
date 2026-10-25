@@ -4,7 +4,8 @@ const DEMO = backend.mode === "demo";
 const LEVEL_NAMES = { 1: "Easy", 2: "Medium", 3: "Hard", 4: "Olympiad" };
 const PRACTICE_LENGTH = 8;
 const CURRENT_KEY = "nitya-current-profile";
-const BANK_KEY = "nitya-ukg-bank-v1";
+// Where step 4's preview kept its New questions seeds; reset clears it.
+const OLD_BANK_KEY = "nitya-ukg-bank-v1";
 const storage = M.browserStorage();
 const screen = document.getElementById("screen");
 const side = document.getElementById("side");
@@ -31,12 +32,20 @@ let sum = null;       // what the dashboard and quiz need, worked out from `data
 let saveError = null;
 let saving = Promise.resolve();
 let app = { mode: "loading" };
+let banks = {};       // topic id -> the approved questions its quizzes use
+let settings = { topics: [], child: [] };   // the admin's topic settings, and the parent's choices for this child
+let newqBusy = null;  // the topic New questions is working on
 
 const classTopics = () => M.contentForClass(child.classId);
 const topicList = () => classTopics().map(t => t.topic);
 const maxMarks = () => M.maxMarks(child.classId);
 const className = id => M.CLASS_NAMES[id];
 function refresh() { sum = M.summarize(child.classId, topicList(), data); }
+/** The pass mark and penalty this child's quizzes on a topic use. */
+function quizSettings(topicId) {
+  const t = settings.topics.find(x => x.topicId === topicId) ?? M.defaultTopicSettings(topicId);
+  return M.effectiveSettings(t, settings.child.find(x => x.topicId === topicId));
+}
 
 /** Saves in order without making the child wait. A failure shows a banner, and the next save tries again. */
 function persist(fn) {
@@ -69,7 +78,14 @@ async function route(preferId) {
 async function openProfile(p) {
   child = p;
   try { storage.setItem(CURRENT_KEY, p.id); } catch (e) {}
-  data = await backend.profileData(p.id);
+  const ids = M.contentForClass(p.classId).map(c => c.topic.id);
+  const [d, topicSettings, childSettings, ...served] = await Promise.all([
+    backend.profileData(p.id), backend.topicSettings(), backend.childSettings(p.id), ...ids.map(id => backend.questions(id)),
+  ]);
+  data = d;
+  settings = { topics: topicSettings, child: childSettings };
+  // A bank that hasn't been loaded into the database yet falls back to the built-in questions.
+  ids.forEach((id, i) => { banks[id] = served[i].length ? served[i] : byId(id).bank; });
   refresh();
   goDash();
 }
@@ -79,52 +95,26 @@ async function boot() {
   await step(async () => { account = await backend.account(); await route(); });
 }
 
-/* ---------- question bank (demo only) ---------- */
-// New questions saves only its seed: replaying the seeds in order makes the same questions again.
-const BUILT_IN = new Map(M.ALL_CONTENT.map(t => [t.topic.id, [...t.bank]]));
-let bankStore = null, bankNote = null, bankBusy = false;
-function loadSeeds() {
-  try { const s = JSON.parse(storage.getItem(BANK_KEY) || "{}"); return s && typeof s === "object" ? s : {}; } catch (e) { return {}; }
-}
-function saveSeeds(seeds) { try { storage.setItem(BANK_KEY, JSON.stringify(seeds)); } catch (e) {} }
-async function addFromSeed(topicId, seed) {
-  const content = byId(topicId);
-  const summary = await M.addNewQuestions(bankStore, content, { seed });
-  content.bank.push(...summary.approved.map(id => bankStore.rows.get(id).question));
-  return summary;
-}
-async function initBank() {
-  for (const t of M.ALL_CONTENT) t.bank = [...BUILT_IN.get(t.topic.id)];
-  bankStore = new M.MemoryQuestionStore(M.ALL_CONTENT.map(M.topicInfo));
-  await M.seedBank(bankStore, M.ALL_CONTENT);
-  for (const [topicId, seeds] of Object.entries(loadSeeds())) {
-    if (byId(topicId)) for (const seed of seeds) await addFromSeed(topicId, seed);
-  }
-}
-function describeAdded(content, summary) {
-  const perLevel = summary.asked / 4;
-  const byLevel = [1, 2, 3, 4].map(l => summary.approved.filter(id => bankStore.rows.get(id).question.level === l).length);
-  const short = [1, 2, 3, 4].filter(l => byLevel[l - 1] < perLevel)
-    .map(l => byLevel[l - 1] ? `${LEVEL_NAMES[l]} had only ${byLevel[l - 1]} new ones left` : `${LEVEL_NAMES[l]} has no new ones left`);
-  const held = summary.inReview.length ? ` ${summary.inReview.length} failed a check and wait for the admin.` : "";
-  return `${content.topic.title}: added ${summary.approved.length} new questions.${short.length ? ` ${short.join("; ")}.` : ""}${held}`;
-}
-async function newQuestions(topicId) {
-  if (bankBusy || !bankStore) return;
-  bankBusy = true;
+/* ---------- New questions ---------- */
+/** Asks for new questions on a topic, for the child playing (or for the admin), and tells the grown-up what happened. */
+async function askNewQuestions(topicId, profileId) {
+  if (newqBusy) return;
+  newqBusy = topicId;
+  app.newqNote = null;
+  render();
+  const title = byId(topicId).topic.title;
   try {
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-    const summary = await addFromSeed(topicId, seed);
-    if (summary.approved.length) {
-      const seeds = loadSeeds();
-      (seeds[topicId] || (seeds[topicId] = [])).push(seed);
-      saveSeeds(seeds);
-    }
-    bankNote = describeAdded(byId(topicId), summary);
+    const r = await backend.newQuestions(topicId, profileId);
+    const held = r.sentToReview ? ` ${r.sentToReview} more ${r.sentToReview === 1 ? "waits" : "wait"} for the admin's check.` : "";
+    app.newqNote = r.added
+      ? `${r.added} new questions added to ${title}.${held}`
+      : `${title} has no new questions left to make right now.${held}`;
+    const fresh = await backend.questions(topicId);
+    if (fresh.length) banks[topicId] = fresh;
   } catch (e) {
-    bankNote = "Couldn't make new questions: " + e.message;
+    app.newqNote = `Couldn't make new questions: ${e.message}`;
   }
-  bankBusy = false;
+  newqBusy = null;
   render();
 }
 
@@ -481,6 +471,7 @@ function renderGrownups() {
       <div><b>${esc(p.nickname)}</b><div class="small muted">${esc(className(p.classId))} · ${esc(M.BOARDS.find(b => b.id === p.board)?.name ?? p.board)} · ${esc(M.LANGUAGES.find(l => l.id === p.language)?.name ?? p.language)}</div></div>
       <div class="row">
         <button class="ghost" type="button" data-edit="${p.id}">Edit</button>
+        <button class="ghost" type="button" data-settings="${p.id}">Quiz settings</button>
         <button class="ghost" type="button" data-download="${p.id}">Download data</button>
         <button class="ghost" type="button" data-delete="${p.id}">${app.confirmDelete === p.id ? `Tap again to delete ${esc(p.nickname)}` : "Delete"}</button>
       </div></div>`).join("")}</div>
@@ -488,12 +479,17 @@ function renderGrownups() {
     <div class="row"><button class="ghost" type="button" id="add">Add a child</button>
       <button class="ghost" type="button" id="pin">Change the PIN</button>
       <button class="ghost" type="button" id="signout">Sign out</button></div>
+    ${account.isAdmin
+      ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each topic's pass marks and the parents' limits, and set the level bands.</p>
+          <div class="row"><button class="ghost" type="button" id="admin">Open the admin panel</button></div></div>`
+      : DEMO ? `<div class="panel"><span class="label">Admin (demo)</span><p class="small muted">In the real app only Nitya's admin sees the admin panel. In the demo you can try it.</p>
+          <div class="row"><button class="ghost" type="button" id="demoadmin">Make me the admin</button></div></div>` : ""}
     <div class="row"><button class="btn primary" type="button" id="done">${child ? `Back to ${esc(child.nickname)}` : "Choose a child"}</button></div>
   </div>`;
   screen.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(profiles.find(p => p.id === b.dataset.edit)));
   screen.querySelectorAll("[data-download]").forEach(b => b.onclick = () => step(async () => {
     const p = profiles.find(x => x.id === b.dataset.download);
-    const value = { exportedAt: new Date().toISOString(), profile: p, ...(await backend.profileData(p.id)) };
+    const value = { exportedAt: new Date().toISOString(), profile: p, ...(await backend.profileData(p.id)), quizSettings: await backend.childSettings(p.id) };
     try { download(`nitya-${p.nickname}.json`, value); } catch (e) {}
     show({ ...app, exported: { name: p.nickname, value }, note: `${p.nickname}'s data is downloading. It is also shown below.`, error: null });
   }));
@@ -507,10 +503,295 @@ function renderGrownups() {
     if (!profiles.length) { startOnboarding(); return; }
     show({ mode: "grownups", note: `${gone.nickname}'s profile and progress are deleted.` });
   }));
+  screen.querySelectorAll("[data-settings]").forEach(b => b.onclick = () => openChildSettings(b.dataset.settings));
+  const adminBtn = document.getElementById("admin");
+  if (adminBtn) adminBtn.onclick = () => openAdmin("queue");
+  const demoAdmin = document.getElementById("demoadmin");
+  if (demoAdmin) demoAdmin.onclick = () => step(async () => {
+    await backend.setDemoAdmin(true);
+    account = await backend.account();
+    await openAdmin("queue");
+  });
   document.getElementById("add").onclick = () => startOnboarding();
   document.getElementById("pin").onclick = () => show({ mode: "set-pin", first: null, then: "grownups", cancel: () => show({ mode: "grownups" }) });
   document.getElementById("signout").onclick = () => step(signOut);
-  document.getElementById("done").onclick = () => (child ? goDash() : show({ mode: "profiles" }));
+  // Reloading the child picks up quiz settings and questions changed here or in the admin panel.
+  document.getElementById("done").onclick = () => step(async () => {
+    if (!child) return show({ mode: "profiles" });
+    await saving;
+    await openProfile(profiles.find(p => p.id === child.id) ?? child);
+  });
+}
+
+/* ---------- a child's quiz settings (grown-ups) ---------- */
+async function openChildSettings(profileId) {
+  await step(async () => {
+    const [topics, mine] = await Promise.all([backend.topicSettings(), backend.childSettings(profileId)]);
+    show({ mode: "child-settings", profile: profiles.find(p => p.id === profileId), topics, mine });
+  });
+}
+
+function stepper(kind, topicId, value, min, max, what) {
+  return `<span class="stepper">
+    <button class="ghost" type="button" data-${kind}="${topicId}" data-by="-1" ${value <= min ? "disabled" : ""} aria-label="Lower the ${what}">−</button>
+    <b aria-live="polite">${value}</b>
+    <button class="ghost" type="button" data-${kind}="${topicId}" data-by="1" ${value >= max ? "disabled" : ""} aria-label="Raise the ${what}">+</button></span>`;
+}
+
+function renderChildSettings() {
+  const p = app.profile;
+  const MAX = M.maxMarks(p.classId);
+  const rows = M.contentForClass(p.classId).map(c => {
+    const t = app.topics.find(x => x.topicId === c.topic.id) ?? M.defaultTopicSettings(c.topic.id);
+    const mine = app.mine.find(x => x.topicId === t.topicId);
+    const eff = M.effectiveSettings(t, mine);
+    const changed = mine && (mine.passMarks !== null || mine.wrongPenalty !== null);
+    return `<div class="setting">
+      <div class="row" style="justify-content:space-between"><h3>${esc(c.topic.title)}</h3>${changed ? `<span class="chip current">Changed</span>` : ""}</div>
+      <div class="setline"><span>Pass mark, out of ${MAX}</span>${t.passMarksMin < t.passMarksMax ? stepper("pass", t.topicId, eff.passMarks, t.passMarksMin, t.passMarksMax, "pass mark") : `<b>${eff.passMarks}</b>`}</div>
+      <div class="setline"><span>Marks off for a wrong first try</span>${t.wrongPenaltyMin < t.wrongPenaltyMax ? stepper("pen", t.topicId, eff.wrongPenalty, t.wrongPenaltyMin, t.wrongPenaltyMax, "penalty") : `<b>${eff.wrongPenalty}</b>`}</div>
+      <p class="small muted">Nitya's default is ${t.passMarks} and ${t.wrongPenalty}. You can choose a pass mark from ${t.passMarksMin} to ${t.passMarksMax}, and ${t.wrongPenaltyMin} to ${t.wrongPenaltyMax} marks off.</p>
+      ${changed ? `<div class="row"><button class="ghost" type="button" data-default="${t.topicId}">Use the default</button></div>` : ""}
+    </div>`;
+  }).join("");
+  screen.innerHTML = `<div class="narrow">
+    <span class="label">Grown-ups</span><h1>Quiz settings for ${esc(p.nickname)}</h1>
+    <p class="muted">Raise the pass mark or the marks off to push ${esc(p.nickname)} further. These change only ${esc(p.nickname)}'s quizzes, from the next one.</p>
+    ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
+    ${errorLine()}
+    <div class="settings">${rows}</div>
+    <div class="row"><button class="btn primary" type="button" id="done">Back to Grown-ups</button></div>
+  </div>`;
+  const change = (topicId, field, by) => {
+    const t = app.topics.find(x => x.topicId === topicId) ?? M.defaultTopicSettings(topicId);
+    const eff = M.effectiveSettings(t, app.mine.find(x => x.topicId === topicId));
+    saveMine(topicId, { [field]: eff[field] + by });
+  };
+  screen.querySelectorAll("[data-pass]").forEach(b => b.onclick = () => change(b.dataset.pass, "passMarks", Number(b.dataset.by)));
+  screen.querySelectorAll("[data-pen]").forEach(b => b.onclick = () => change(b.dataset.pen, "wrongPenalty", Number(b.dataset.by)));
+  screen.querySelectorAll("[data-default]").forEach(b => b.onclick = () => saveMine(b.dataset.default, { passMarks: null, wrongPenalty: null }));
+  document.getElementById("done").onclick = () => show({ mode: "grownups" });
+}
+
+function saveMine(topicId, change) {
+  const t = app.topics.find(x => x.topicId === topicId) ?? M.defaultTopicSettings(topicId);
+  const next = { topicId, passMarks: null, wrongPenalty: null, ...app.mine.find(x => x.topicId === topicId), ...change };
+  // The default, chosen again, is kept as "the default", so it follows the admin's.
+  if (next.passMarks === t.passMarks) next.passMarks = null;
+  if (next.wrongPenalty === t.wrongPenalty) next.wrongPenalty = null;
+  const profileId = app.profile.id;
+  step(async () => {
+    await backend.saveChildSettings(profileId, next);
+    app.mine = [...app.mine.filter(x => x.topicId !== topicId), ...(next.passMarks !== null || next.wrongPenalty !== null ? [next] : [])];
+    if (child && child.id === profileId) settings.child = app.mine;
+    app.note = "Saved."; app.error = null;
+    render();
+  });
+}
+
+/* ---------- the admin panel ---------- */
+const ADMIN_TABS = [["queue", "Review queue"], ["topics", "Topic settings"], ["bands", "Level bands"], ["newq", "New questions"]];
+const CHECK_NAMES = { answer: "Right answer", options: "Options", scope: "Syllabus scope", level: "Level tag", wording: "Wording and safety" };
+const sourceLabel = q => q.source === "csv" ? `CSV: ${q.sourceRef ?? "no row"}` : q.source === "website" ? `Website: ${q.sourceRef ?? ""}` : `Template${q.sourceRef ? `: ${q.sourceRef}` : ""}`;
+const topicTitle = id => byId(id)?.topic.title ?? id;
+
+async function openAdmin(tab, extra = {}) {
+  await step(async () => {
+    const next = { mode: "admin", tab, ...extra };
+    if (tab === "queue") next.queue = await backend.reviewQueue();
+    if (tab === "topics") next.topics = await backend.topicSettings();
+    if (tab === "bands") next.cuts = M.cutsOf(await backend.levelBands());
+    if (tab === "newq") {
+      const [log, counts] = await Promise.all([
+        backend.questionRequests(20), Promise.all(M.ALL_CONTENT.map(c => backend.questions(c.topic.id).then(q => q.length))),
+      ]);
+      Object.assign(next, { log, counts });
+    }
+    show(next);
+  });
+}
+
+function reviewCard(e) {
+  const q = e.question, c = byId(q.topicId);
+  const problems = e.report ? M.reportProblems(e.report) : ["It has no check report."];
+  const confirming = d => app.confirm === `${d}:${q.id}`;
+  return `<div class="qcard">
+    <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(c?.subSkillNames[q.subSkill] ?? q.subSkill)} · ${esc(sourceLabel(q))}</div>
+    <p class="prompt">${esc(q.prompt)}</p>
+    ${dotsSvg(q.visual)}
+    ${q.options ? `<div class="optlist">${q.options.map(o => `<span class="${q.answers.includes(o) ? "ans" : ""}">${esc(o)}</span>`).join("")}</div>` : ""}
+    <p class="small">Answer given: <b>${esc(q.answers.join(", "))}</b></p>
+    <ul class="problems">${problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+    <div class="row">
+      <button class="ghost" type="button" data-decide="approved" data-q="${q.id}">${confirming("approved") ? "Tap again to approve as it is" : "Approve"}</button>
+      ${M.canFixHere(q) ? `<button class="ghost" type="button" data-fixq="${q.id}">Fix</button>` : ""}
+      <button class="ghost" type="button" data-decide="rejected" data-q="${q.id}">${confirming("rejected") ? "Tap again to reject" : "Reject"}</button>
+    </div>
+    ${M.canFixHere(q) ? "" : `<p class="small muted">This came from a CSV, so fix it in the Drive file (${esc(q.sourceRef ?? "its row")}). The next sync checks it again.</p>`}
+  </div>`;
+}
+
+function renderAdmin() {
+  const tabs = `<div class="tabs" role="tablist">${ADMIN_TABS.map(([id, name]) => `<button class="ghost ${app.tab === id ? "on" : ""}" type="button" role="tab"
+    aria-selected="${app.tab === id}" data-tab="${id}">${esc(name)}</button>`).join("")}</div>`;
+  let body = "";
+  if (app.tab === "queue") {
+    body = app.queue.length
+      ? `<p class="muted">${app.queue.length} ${app.queue.length === 1 ? "question failed" : "questions failed"} a check. Children never see a question until it is approved.</p>${app.queue.map(reviewCard).join("")}`
+      : `<p class="muted">Nothing to review. Questions that fail a check wait here.</p>`;
+  } else if (app.tab === "topics") {
+    const field = (t, f, label) => `<label>${label}<input type="number" inputmode="numeric" data-topic="${t.topicId}" data-f="${f}" value="${t[f]}"></label>`;
+    body = `<p class="muted">Each topic's pass mark and the marks off for a wrong first try, and how far a parent may change them for one child.</p>
+      ${app.topics.filter(t => byId(t.topicId)).map(t => `<div class="setting">
+        <h3>${esc(topicTitle(t.topicId))} <small class="muted small">${esc(className(byId(t.topicId).topic.classId))}</small></h3>
+        <div class="nums">${field(t, "passMarks", "Pass mark")}${field(t, "passMarksMin", "Parents from")}${field(t, "passMarksMax", "Parents up to")}</div>
+        <div class="nums">${field(t, "wrongPenalty", "Marks off")}${field(t, "wrongPenaltyMin", "Parents from")}${field(t, "wrongPenaltyMax", "Parents up to")}</div>
+        ${app.topicMsg?.topicId === t.topicId ? `<p class="${app.topicMsg.error ? "error" : "note"}" role="status">${esc(app.topicMsg.text)}</p>` : ""}
+        <div class="row"><button class="ghost" type="button" data-save="${t.topicId}">Save</button></div></div>`).join("")}`;
+  } else if (app.tab === "bands") {
+    const c = app.cuts;
+    const pct = (f, label) => `<label>${label}<input type="number" inputmode="numeric" id="cut-${f}" value="${c[f]}"></label>`;
+    body = `<p class="muted">How often children should get a question right first time at each level. A question whose live results fall outside its level's band goes back through the checks.</p>
+      <div class="nums">${pct("l1", "L1 Easy from %")}${pct("l2", "L2 Medium from %")}${pct("l3", "L3 Hard from %")}</div>
+      <ul class="points small" id="bandtext">${bandText(c)}</ul>
+      <div class="row"><button class="ghost" type="button" id="savebands">Save the bands</button></div>`;
+  } else if (app.tab === "newq") {
+    body = `<p class="muted">Make questions from a topic's templates. Each one is checked; those that fail wait in the review queue. Families can ask ${M.NEW_QUESTIONS_PER_DAY} times a day; you can ask any time.</p>
+      <div class="family">${M.ALL_CONTENT.map((c, i) => `<div class="member"><div><b>${esc(c.topic.title)}</b><div class="small muted">${esc(className(c.topic.classId))} · ${app.counts[i]} approved questions</div></div>
+        <div class="row"><button class="ghost" type="button" data-adminnewq="${c.topic.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === c.topic.id ? "Making questions…" : "New questions"}</button></div></div>`).join("")}</div>
+      <span class="label">Recent requests</span>
+      ${app.log.length ? `<div class="log">${app.log.map(r => `<div><span>${esc(new Date(r.requestedAt).toLocaleString())}</span><span>${esc(topicTitle(r.topicId))}</span>
+        <span>${r.by === "child" ? "A child" : "A grown-up"}</span><span>${r.added} added${r.sentToReview ? `, ${r.sentToReview} to review` : ""}</span></div>`).join("")}</div>` : `<p class="small muted">No requests yet.</p>`}`;
+  }
+  screen.innerHTML = `
+    <div class="row" style="justify-content:space-between"><div style="display:grid;gap:4px"><span class="label">Admin</span><h1>Admin panel</h1></div>
+      <button class="ghost" type="button" id="back">Back to Grown-ups</button></div>
+    ${tabs}
+    ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
+    ${app.newqNote ? `<p class="note" role="status">${esc(app.newqNote)}</p>` : ""}
+    ${errorLine()}
+    ${body}`;
+
+  document.getElementById("back").onclick = () => show({ mode: "grownups" });
+  screen.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => openAdmin(b.dataset.tab));
+  screen.querySelectorAll("[data-decide]").forEach(b => b.onclick = () => {
+    const key = `${b.dataset.decide}:${b.dataset.q}`;
+    if (app.confirm !== key) { app.confirm = key; render(); return; }
+    step(async () => {
+      await backend.reviewQuestion(b.dataset.q, { decision: b.dataset.decide });
+      await openAdmin("queue", { note: b.dataset.decide === "approved" ? "Approved. Children can get it in their next quiz." : "Rejected. Children won't see it." });
+      toTop();
+    });
+  });
+  screen.querySelectorAll("[data-fixq]").forEach(b => b.onclick = () => {
+    const entry = app.queue.find(e => e.question.id === b.dataset.fixq);
+    show({ mode: "fix", entry, edits: M.editsOf(entry.question), report: entry.report, candidate: null });
+  });
+  screen.querySelectorAll("[data-save]").forEach(b => b.onclick = () => {
+    const t = { ...app.topics.find(x => x.topicId === b.dataset.save) };
+    screen.querySelectorAll(`[data-topic="${t.topicId}"]`).forEach(i => { t[i.dataset.f] = Number(i.value); });
+    // The message shows in the topic's own box, which may be far down the page.
+    const say = (text, error) => { app.topicMsg = { topicId: t.topicId, text, error }; app.note = null; render(); };
+    const problems = M.topicSettingsProblems(t, M.maxMarks(byId(t.topicId).topic.classId));
+    if (problems.length) return say(problems.join(" "), true);
+    step(async () => {
+      try { await backend.saveTopicSettings(t); } catch (err) { return say(err.message, true); }
+      await openAdmin("topics", { topicMsg: { topicId: t.topicId, text: "Saved. Quizzes started from now use it." } });
+    });
+  });
+  const cut = f => Number(document.getElementById(`cut-${f}`).value);
+  const readCuts = () => ({ l1: cut("l1"), l2: cut("l2"), l3: cut("l3") });
+  if (app.tab === "bands") {
+    screen.querySelectorAll("[id^=cut-]").forEach(i => i.oninput = () => {
+      const c = readCuts();
+      document.getElementById("bandtext").innerHTML = M.bandCutsProblem(c) ? `<li class="error">${esc(M.bandCutsProblem(c))}</li>` : bandText(c);
+    });
+    document.getElementById("savebands").onclick = () => {
+      const c = readCuts();
+      const problem = M.bandCutsProblem(c);
+      if (problem) { app.error = problem; app.note = null; render(); return; }
+      step(async () => { await backend.saveLevelBands(c); await openAdmin("bands", { note: "The level bands are saved." }); });
+    };
+  }
+  screen.querySelectorAll("[data-adminnewq]").forEach(b => b.onclick = async () => {
+    await askNewQuestions(b.dataset.adminnewq);
+    const note = app.newqNote;
+    await openAdmin("newq", { newqNote: note });
+    toTop();
+  });
+}
+
+/** The admin panel's messages sit at the top, and the card that was tapped may be gone. */
+function toTop() { try { window.scrollTo(0, 0); } catch (e) {} }
+
+function bandText(c) {
+  return `<li>L1 Easy: ${c.l1}% or more right first time</li><li>L2 Medium: ${c.l2}% to ${c.l1}%</li>
+    <li>L3 Hard: ${c.l3}% to ${c.l2}%</li><li>L4 Olympiad: under ${c.l3}%</li>`;
+}
+
+/* ---------- fixing a question (admin) ---------- */
+function renderFix() {
+  const q = app.entry.question, c = byId(q.topicId), e = app.edits;
+  const text = (f, label, hint = "") => `<label for="f-${f}">${label}</label><input id="f-${f}" type="text" value="${esc(e[f])}" autocomplete="off">${hint ? `<p class="small muted">${hint}</p>` : ""}`;
+  const report = app.report;
+  const checks = report ? Object.entries(CHECK_NAMES).map(([k, name]) => `<li class="${report[k].passed ? "ok" : "bad"}">${report[k].passed ? "✓" : "✗"} ${esc(name)}${report[k].problems.length ? `: ${esc(report[k].problems.join(" "))}` : ""}</li>`).join("") : "";
+  const ready = app.candidate && app.report;
+  screen.innerHTML = `<div class="narrow" style="max-width:720px">
+    <span class="label">Admin · Fix a question</span><h1>${esc(topicTitle(q.topicId))}</h1>
+    <p class="small muted">${esc(sourceLabel(q))} · id ${esc(q.id)}</p>
+    <form id="fixform" novalidate>
+      ${text("prompt", "Question")}
+      ${text("options", "Options", 'Separate them with "|", like 6 | 7 | 8.')}
+      ${text("answers", "Right answer")}
+      <label for="f-level">Level</label><select id="f-level">${[1, 2, 3, 4].map(l => `<option value="${l}" ${String(l) === e.level ? "selected" : ""}>L${l} ${LEVEL_NAMES[l]}</option>`).join("")}</select>
+      <label for="f-subSkill">Skill</label><select id="f-subSkill">${Object.entries(c.subSkillNames).map(([id, name]) => `<option value="${esc(id)}" ${id === e.subSkill ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+      ${text("hint", "Hint after a wrong first try")}
+      ${text("explanation", "Working shown after a wrong answer")}
+      ${text("reason", "Reason shown with the praise")}
+      ${text("picture", "Picture", 'Dots, like "3 blue, 2 orange" or "5 blue 2 crossed". Leave empty for none.')}
+      ${text("working", "Working", 'How the answer is worked out, so the checks can recompute it: a sum like "4 + 3", "count dots", or JSON.')}
+    </form>
+    ${errorLine()}
+    ${report ? `<div class="panel"><span class="label">${ready ? "Checks on your fix" : "Checks on the question now"}</span><ul class="checks">${checks}</ul></div>` : ""}
+    <div class="row"><button class="ghost" type="button" id="check">Check my fix</button>
+      <button class="btn primary" type="button" id="save" ${ready ? "" : "disabled"}>${ready && !app.report.passed ? (app.confirmSave ? "Tap again to approve anyway" : "Approve with these problems") : "Save and approve"}</button>
+      <button class="ghost" type="button" id="cancel">Cancel</button></div>
+  </div>`;
+  const read = () => {
+    const out = {};
+    for (const f of ["prompt", "options", "answers", "hint", "explanation", "reason", "picture", "working"]) out[f] = document.getElementById(`f-${f}`).value;
+    out.level = document.getElementById("f-level").value;
+    out.subSkill = document.getElementById("f-subSkill").value;
+    return out;
+  };
+  document.getElementById("check").onclick = () => {
+    app.edits = read();
+    app.confirmSave = false;
+    try {
+      app.candidate = M.applyEdits(q, app.edits);
+      app.report = M.recheck(app.candidate, M.ALL_CONTENT.map(M.topicInfo));
+      app.error = null;
+    } catch (err) {
+      app.candidate = null; app.error = err.message;
+    }
+    render();
+  };
+  // Changing a field after a check means checking again before saving.
+  screen.querySelectorAll("#fixform input, #fixform select").forEach(i => i.oninput = () => {
+    if (!app.candidate) return;
+    app.candidate = null;
+    const save = document.getElementById("save");
+    save.disabled = true;
+    save.textContent = "Save and approve";
+  });
+  document.getElementById("save").onclick = () => {
+    if (!app.report.passed && !app.confirmSave) { app.confirmSave = true; render(); return; }
+    step(async () => {
+      await backend.reviewQuestion(q.id, { decision: "fixed", question: app.candidate, report: app.report });
+      await openAdmin("queue", { note: "Fixed and approved. Children can get it in their next quiz." });
+    });
+  };
+  document.getElementById("cancel").onclick = () => openAdmin("queue");
 }
 
 /* ---------- topics and quizzes ---------- */
@@ -528,8 +809,8 @@ function attemptNoFor(topicId) {
 }
 
 function startQuiz(topicId, practiceSkill) {
-  const content = byId(topicId);
-  const bank = practiceSkill ? content.bank.filter(q => q.subSkill === practiceSkill) : content.bank;
+  const all = banks[topicId] ?? byId(topicId).bank;
+  const bank = practiceSkill ? all.filter(q => q.subSkill === practiceSkill) : all;
   const play = {
     id: crypto.randomUUID(), topicId, attemptNo: (sum.plays[topicId] ?? 0) + 1,
     practice: !!practiceSkill, startedAt: new Date().toISOString(),
@@ -540,7 +821,7 @@ function startQuiz(topicId, practiceSkill) {
   persist(() => backend.startAttempt(profileId, play));
   app = {
     mode: "quiz", topicId, practiceSkill, bank, practiceTotal: Math.min(PRACTICE_LENGTH, bank.length), playId: play.id,
-    state: M.startQuiz({ classId: child.classId, topicId, attemptNo: attemptNoFor(topicId), seenBefore: sum.seen[topicId] || [] }),
+    state: M.startQuiz({ classId: child.classId, topicId, attemptNo: attemptNoFor(topicId), seenBefore: sum.seen[topicId] || [], ...quizSettings(topicId) }),
     phase: "ask", feedback: null, prevMarks: 0, delta: null,
   };
   app.q = M.nextQuestion(app.state, app.bank);
@@ -578,7 +859,7 @@ function finish() {
   const playId = app.playId, profileId = child.id;
   const play = data.attempts.find(a => a.id === playId);
   if (app.practiceSkill) {
-    const result = { marks: s.marks, cleared: false, stars: 0, passMarks: M.PASS_MARKS, maxMarks: maxMarks(), correct: s.correct };
+    const result = { marks: s.marks, cleared: false, stars: 0, passMarks: s.passMarks, maxMarks: maxMarks(), correct: s.correct };
     Object.assign(play, { finishedAt: new Date().toISOString(), marks: result.marks, cleared: false, stars: 0 });
     persist(() => backend.finishAttempt(playId, result));
     refresh();
@@ -606,24 +887,27 @@ function renderDash() {
   const states = topics.map(t => sum.progress.topics[t.id]);
   const clearedCount = states.filter(s => s.state === "cleared").length;
   const totalStars = Object.values(sum.stars).reduce((a, b) => a + b, 0);
-  const passPct = (M.PASS_MARKS / MAX) * 100;
   const next = M.nextClass(child.classId);
+  const passMarks = topics.map(t => quizSettings(t.id).passMarks);
+  const samePass = passMarks.every(m => m === passMarks[0]);
 
   const rows = topics.map((t, i) => {
     const e = sum.progress.topics[t.id];
     const stars = sum.stars[t.id] || 0;
     const bestPct = Math.min(100, (e.bestScore / MAX) * 100);
+    const pass = passMarks[i], passPct = (pass / MAX) * 100;
     const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
     const score = e.attempts
-      ? `<span>Best ${e.bestScore} / ${MAX}</span><span class="mini" aria-hidden="true"><b class="${e.bestScore >= M.PASS_MARKS ? "ok" : ""}" style="width:${bestPct}%"></b><i style="left:${passPct}%"></i></span><span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>${stars ? `<span class="stars-sm" aria-label="${stars} stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</span>` : ""}`
+      ? `<span>Best ${e.bestScore} / ${MAX}</span><span class="mini" aria-hidden="true"><b class="${e.bestScore >= pass ? "ok" : ""}" style="width:${bestPct}%"></b><i style="left:${passPct}%"></i></span><span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>${stars ? `<span class="stars-sm" aria-label="${stars} stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</span>` : ""}`
       : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
     const act = e.state === "current"
       ? `<button class="chipbtn" type="button" data-open="${t.id}">${e.attempts ? "Try again" : "Start"}</button>`
       : e.state === "cleared" ? `<button class="chipbtn soft" type="button" data-open="${t.id}">Practise</button>` : "";
+    const newq = e.state === "locked" ? "" : `<button class="linkbtn" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "New questions"}</button>`;
     return `<div class="topic ${e.state}">
       <span class="num" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>
-      <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
-      <div class="act">${act}</div></div>`;
+      <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}${samePass ? "" : `<span>Pass ${pass}</span>`}</div></div>
+      <div class="act">${act}${newq}</div></div>`;
   }).join("");
 
   const areas = Object.entries(sum.skills)
@@ -654,6 +938,7 @@ function renderDash() {
       <div class="row"><button class="ghost" type="button" id="switch">Switch child</button>
         <button class="ghost" type="button" id="grownups">Grown-ups</button></div></div>
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
+    ${app.newqNote ? `<p class="note" role="status">${esc(app.newqNote)}</p>` : ""}
     <div class="dash-head">
       <div style="display:grid;gap:4px"><span class="label">Class dashboard</span><h1>${esc(cls)} Maths</h1></div>
       <div class="row" style="gap:24px">
@@ -663,7 +948,7 @@ function renderDash() {
     </div>
     <div class="overall">
       <div class="segs" aria-label="${clearedCount} of ${topics.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
-      <p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. Each quiz needs ${M.PASS_MARKS} of ${MAX} marks.`}</p>
+      <p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. ${samePass ? `Each quiz needs ${passMarks[0]} of ${MAX} marks.` : "Each topic shows the marks it needs."}`}</p>
     </div>
     <div class="topics">${rows}</div>
     <div class="panels">
@@ -672,6 +957,7 @@ function renderDash() {
     </div>`;
   screen.querySelectorAll("[data-open]").forEach(b => b.onclick = () => openTopic(b.dataset.open));
   screen.querySelectorAll("[data-practice]").forEach(b => b.onclick = () => { const [t, s] = b.dataset.practice.split("|"); startQuiz(t, s); });
+  screen.querySelectorAll("[data-newq]").forEach(b => b.onclick = async () => { await askNewQuestions(b.dataset.newq, child.id); toTop(); });
   document.getElementById("switch").onclick = () => askPin("To switch to another child.", () => show({ mode: "profiles" }));
   document.getElementById("grownups").onclick = () => askPin("To open the grown-ups' page.", () => show({ mode: "grownups" }));
 }
@@ -730,20 +1016,21 @@ function backToQuiz() { app = app.saved; app.prevMarks = app.state.marks; render
 function marksBar() {
   const s = app.state;
   const MAX = maxMarks();
-  const passPct = (M.PASS_MARKS / MAX) * 100;
-  const q = s.marks >= M.PASS_MARKS;
+  const PASS = s.passMarks;
+  const passPct = (PASS / MAX) * 100;
+  const q = s.marks >= PASS;
   const d = app.delta;
   const deltaHtml = d === null || d === undefined ? "" : d > 0 ? `<span class="delta up">+${d}</span>` : d < 0 ? `<span class="delta down">−${-d}</span>` : "";
   return `<div class="marks">
     <div class="marks-top">
       <div><span class="label">Marks</span><div><span class="marks-num">${s.marks}</span>${deltaHtml}</div></div>
-      <span class="qual ${q ? "yes" : ""}">${q ? "Pass mark crossed! Keep going to the end." : `${M.PASS_MARKS - s.marks} more ${M.PASS_MARKS - s.marks === 1 ? "mark" : "marks"} to pass`}</span>
+      <span class="qual ${q ? "yes" : ""}">${q ? "Pass mark crossed! Keep going to the end." : `${PASS - s.marks} more ${PASS - s.marks === 1 ? "mark" : "marks"} to pass`}</span>
     </div>
     <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${MAX}" aria-valuenow="${s.marks}" aria-label="Marks">
       <div class="fill ${q ? "qualified" : ""}" id="fill" style="width:${(Math.min(app.prevMarks, MAX) / MAX) * 100}%"></div>
-      <div class="passmark ${q ? "crossed" : ""}" style="left:${passPct}%"><span>${q ? "✓ " : ""}Pass ${M.PASS_MARKS}</span></div>
+      <div class="passmark ${q ? "crossed" : ""}" style="left:${passPct}%"><span>${q ? "✓ " : ""}Pass ${PASS}</span></div>
     </div>
-    <div class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away 1.</div>
+    <div class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away ${s.wrongPenalty}.</div>
   </div>`;
 }
 
@@ -813,10 +1100,10 @@ function renderResult() {
   const c = byId(app.topicId);
   const MAX = maxMarks();
   const cls = className(child.classId);
-  const passPct = (M.PASS_MARKS / MAX) * 100;
+  const passPct = (o.passMarks / MAX) * 100;
   const bar = `<div class="marks"><div class="marks-top"><div><span class="label">Final marks</span><div class="marks-num">${o.marks} / ${MAX}</div></div>
-      <span class="qual ${o.cleared ? "yes" : ""}">${o.cleared ? "Above the pass mark" : `${M.PASS_MARKS - o.marks} short of the pass mark`}</span></div>
-    <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>Pass ${M.PASS_MARKS}</span></div></div>
+      <span class="qual ${o.cleared ? "yes" : ""}">${o.cleared ? "Above the pass mark" : `${o.passMarks - o.marks} short of the pass mark`}</span></div>
+    <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>Pass ${o.passMarks}</span></div></div>
     <div class="small muted">${o.correct} of ${M.QUIZ_LENGTH} right first time</div></div>`;
 
   if (o.cleared && effect.kind === "promoted") {
@@ -843,7 +1130,7 @@ function renderResult() {
   } else {
     const weak = o.weakSubSkills[0];
     screen.innerHTML = `
-      <div class="mascot">${MASCOT}<div class="bubble"><h2>Almost there!</h2><p>You need ${M.PASS_MARKS} marks to open the next topic. Harder questions give more marks.</p></div></div>
+      <div class="mascot">${MASCOT}<div class="bubble"><h2>Almost there!</h2><p>You need ${o.passMarks} marks to open the next topic. Harder questions give more marks.</p></div></div>
       ${bar}
       <div class="row">
         <button class="btn primary" type="button" id="lesson">Watch the lesson again</button>
@@ -877,22 +1164,16 @@ function renderSide() {
     side.hidden = !tools;
     if (!tools) { side.innerHTML = ""; return; }
     side.innerHTML = `<span class="label">Tester tools (demo only)</span>
-      <p class="small muted">The demo keeps everything in this browser. Reset to start again from sign-in.</p>
+      <p class="small muted">The demo keeps everything in this browser. Reset to start again from sign-in, with the built-in questions only.</p>
       <div class="tools"><button class="ghost" type="button" id="reset">Reset the demo</button></div>
-      <div class="tools"><span class="label">Question bank</span>
-        <p class="small muted">New questions makes fresh questions from the topic's templates, checks every one, and adds the ones that pass. Quizzes start using them straight away.</p>
-        ${classTopics().map(t => `<div class="bankrow"><span class="small"><b>${esc(t.topic.title)}</b> · <span class="muted">${t.bank.length} questions</span></span>
-          <button class="ghost" type="button" data-newq="${t.topic.id}" ${bankStore && !bankBusy ? "" : "disabled"}>New questions</button></div>`).join("")}
-        ${bankNote ? `<p class="small" role="status">${esc(bankNote)}</p>` : ""}</div>`;
-    side.querySelectorAll("[data-newq]").forEach(b => b.onclick = () => newQuestions(b.dataset.newq));
+      <p class="small muted">To try the admin panel, open Grown-ups and tap "Make me the admin".</p>`;
     const reset = document.getElementById("reset");
-    reset.onclick = async () => {
+    reset.onclick = () => {
       if (!reset.dataset.sure) { reset.dataset.sure = "1"; reset.textContent = "Tap again to reset"; return; }
-      try { storage.setItem("nitya-demo-v1", "null"); storage.setItem(CURRENT_KEY, ""); } catch (e) {}
-      saveSeeds({}); bankNote = null; bankStore = null;
-      account = null; child = null; data = null; sum = null; profiles = [];
+      for (const k of [M.DEMO_KEY, M.demoBankKey(M.DEMO_KEY), OLD_BANK_KEY]) { try { storage.setItem(k, "null"); } catch (e) {} }
+      try { storage.setItem(CURRENT_KEY, ""); } catch (e) {}
+      account = null; child = null; data = null; sum = null; profiles = []; banks = {};
       show({ mode: "signin" });
-      await initBank(); render();
     };
     return;
   }
@@ -927,7 +1208,8 @@ const SCREENS = {
   error: () => { screen.innerHTML = `<div class="narrow">${errorLine()}</div>`; },
   signin: renderSignin, "email-sent": renderEmailSent, consent: renderConsent, "set-pin": renderSetPin, pin: renderPin,
   profiles: renderProfiles, onboard: renderOnboard, "placement-offer": renderPlacementOffer, placement: renderPlacement,
-  "placement-result": renderPlacementResult, grownups: renderGrownups,
+  "placement-result": renderPlacementResult, grownups: renderGrownups, "child-settings": renderChildSettings,
+  admin: renderAdmin, fix: renderFix,
   dash: renderDash, lesson: renderLesson, quiz: renderQuiz, result: renderResult, "practice-done": renderPracticeDone,
 };
 
@@ -942,4 +1224,3 @@ function render() {
 let lastView = "";
 
 boot();
-initBank().then(render, e => { bankNote = "Couldn't load the question bank: " + e.message; render(); });

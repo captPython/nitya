@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { applyEdits, editsOf, recheck } from "../src/admin/review";
+import { defaultTopicSettings } from "../src/admin/settings";
+import { DEMO_REVIEW_SAMPLES } from "../src/accounts/demo-samples";
+import { ALL_CONTENT } from "../src/content";
 import { UKG_TOPICS } from "../src/content/ukg";
 import type { AccountBackend } from "../src/accounts/backend";
 import type { ProfileDetails } from "../src/accounts/options";
+import { topicInfo } from "../src/supply";
+import { DEFAULT_BANDS } from "../src/validation";
 
 const RIYA: ProfileDetails = { nickname: "Riya", avatar: "owl", classId: "UKG", board: "CBSE", language: "en" };
 const KABIR: ProfileDetails = { nickname: "Kabir", avatar: "tiger", classId: "UKG", board: "ICSE", language: "hi" };
@@ -10,14 +16,31 @@ const [Q1, Q2] = COUNTING.bank;
 const HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
 /**
- * What every account backend must do, run against the demo backend and the
- * Supabase one alike. `newFamily` signs in a parent nobody has seen before.
+ * One Nitya: its question bank (the built-in questions, plus the planted
+ * mistakes in DEMO_REVIEW_SAMPLES waiting for review), the starting settings,
+ * and the people signed in to it.
  */
-export function accountContract(name: string, newFamily: () => Promise<AccountBackend>) {
+export interface ContractWorld {
+  /** A parent nobody has seen before, signed in. */
+  family(): Promise<AccountBackend>;
+  /** A signed-in admin. */
+  admin(): Promise<AccountBackend>;
+}
+
+const V = "2026-10-25";
+const sampleIds = (ids: string[]) => ids.filter(id => id.startsWith("demo-")).sort();
+
+/**
+ * What every account backend must do, run against the demo backend and the
+ * Supabase one alike. Each `newWorld` starts from the same bank and settings.
+ */
+export function accountContract(name: string, newWorld: () => Promise<ContractWorld>) {
+  const newFamily = async () => (await newWorld()).family();
+
   describe(`${name}: an account`, () => {
     it("starts with no consent, no PIN and no profiles", async () => {
       const b = await newFamily();
-      expect(await b.account()).toMatchObject({ consentVersion: null, pinHash: null });
+      expect(await b.account()).toMatchObject({ consentVersion: null, pinHash: null, isAdmin: false });
       expect(await b.profiles()).toEqual([]);
     });
 
@@ -94,6 +117,134 @@ export function accountContract(name: string, newFamily: () => Promise<AccountBa
       await expect(b.deleteProfile(riya.id)).rejects.toThrow();
       await expect(b.startAttempt(riya.id, { id: crypto.randomUUID(), topicId: COUNTING.topic.id, attemptNo: 1, practice: false, startedAt: new Date().toISOString() })).rejects.toThrow();
       expect((await a.profiles()).map(p => p.nickname)).toEqual(["Riya"]);
+    });
+  });
+
+  describe(`${name}: questions, settings and the admin panel`, () => {
+    it("serves only approved questions", async () => {
+      const b = await (await newWorld()).family();
+      const served = await b.questions("ukg-addition-10");
+      expect(served.length).toBeGreaterThanOrEqual(80);
+      expect(served.every(q => q.topicId === "ukg-addition-10")).toBe(true);
+      expect(sampleIds(served.map(q => q.id))).toEqual([]);
+    });
+
+    it("starts every topic at a pass mark of 44 (parents 44 to 60) and a penalty of 1 (parents 1 or 2)", async () => {
+      const b = await (await newWorld()).family();
+      const settings = await b.topicSettings();
+      for (const t of UKG_TOPICS) expect(settings.find(s => s.topicId === t.topic.id)).toEqual(defaultTopicSettings(t.topic.id));
+      expect(await b.levelBands()).toEqual(DEFAULT_BANDS);
+    });
+
+    it("keeps a parent's change to one child inside the admin's limits, for that child only", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const riya = await b.createProfile(RIYA);
+      const kabir = await b.createProfile(KABIR);
+      const topicId = COUNTING.topic.id;
+      await b.saveChildSettings(riya.id, { topicId, passMarks: 50, wrongPenalty: 2 });
+      expect(await b.childSettings(riya.id)).toEqual([{ topicId, passMarks: 50, wrongPenalty: 2 }]);
+      expect(await b.childSettings(kabir.id)).toEqual([]);
+      await expect(b.saveChildSettings(riya.id, { topicId, passMarks: 61, wrongPenalty: null })).rejects.toThrow("44 to 60");
+      await expect(b.saveChildSettings(riya.id, { topicId, passMarks: 43, wrongPenalty: null })).rejects.toThrow("44 to 60");
+      await expect(b.saveChildSettings(riya.id, { topicId, passMarks: null, wrongPenalty: 3 })).rejects.toThrow("1 to 2");
+      expect(await b.childSettings(riya.id)).toEqual([{ topicId, passMarks: 50, wrongPenalty: 2 }]);
+      const other = await w.family();
+      await other.giveConsent(V);
+      await expect(other.saveChildSettings(riya.id, { topicId, passMarks: 55, wrongPenalty: null })).rejects.toThrow();
+      // Another family is refused, or simply sees nothing.
+      expect(await other.childSettings(riya.id).catch(() => [])).toEqual([]);
+      await b.saveChildSettings(riya.id, { topicId, passMarks: null, wrongPenalty: null });
+      expect(await b.childSettings(riya.id)).toEqual([]);
+    });
+
+    it("lets only an admin see the review queue", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      const admin = await w.admin();
+      expect((await admin.account())?.isAdmin).toBe(true);
+      await expect(b.reviewQueue()).rejects.toThrow(/only an admin/i);
+      const queue = await admin.reviewQueue();
+      expect(sampleIds(queue.map(e => e.question.id))).toEqual(sampleIds(DEMO_REVIEW_SAMPLES.map(q => q.id)));
+      for (const e of queue) expect(e.report?.passed).toBe(false);
+      await expect(b.reviewQuestion("demo-wrong-level", { decision: "approved" })).rejects.toThrow(/only an admin/i);
+    });
+
+    it("approves, rejects and fixes questions, and serves only the approved ones", async () => {
+      const w = await newWorld();
+      const admin = await w.admin();
+      const b = await w.family();
+      const served = async (topicId: string) => (await b.questions(topicId)).map(q => q.id);
+
+      expect(await served("ukg-addition-10")).not.toContain("demo-wrong-level");
+      await admin.reviewQuestion("demo-wrong-level", { decision: "approved", note: "Fine as a warm-up." });
+      expect(await served("ukg-addition-10")).toContain("demo-wrong-level");
+
+      await admin.reviewQuestion("demo-out-of-range", { decision: "rejected" });
+      expect(await served("ukg-before-after")).not.toContain("demo-out-of-range");
+      await expect(admin.reviewQuestion("demo-out-of-range", { decision: "approved" })).rejects.toThrow("already reviewed");
+
+      const queue = await admin.reviewQueue();
+      const wrong = queue.find(e => e.question.id === "demo-wrong-answer")!;
+      const fixed = applyEdits(wrong.question, { ...editsOf(wrong.question), answers: "7" });
+      const report = recheck(fixed, ALL_CONTENT.map(topicInfo));
+      expect(report.passed).toBe(true);
+      await admin.reviewQuestion(fixed.id, { decision: "fixed", question: fixed, report });
+      expect((await b.questions("ukg-addition-10")).find(q => q.id === "demo-wrong-answer")).toMatchObject({ prompt: "What is 4 + 3?", answers: ["7"] });
+
+      // A CSV question is fixed in its Drive file instead.
+      const csv = queue.find(e => e.question.id === "demo-csv-no-working")!;
+      await expect(admin.reviewQuestion(csv.question.id, { decision: "fixed", question: csv.question, report: csv.report! })).rejects.toThrow("Drive");
+      // A fix can't turn a question into one the bank already has.
+      const dup = queue.find(e => e.question.id === "demo-duplicate-options")!;
+      const copy = applyEdits(dup.question, { ...editsOf(dup.question), prompt: "What comes just after 5?", options: "6 | 4 | 7" });
+      await expect(admin.reviewQuestion(dup.question.id, { decision: "fixed", question: copy, report: recheck(copy, ALL_CONTENT.map(topicInfo)) }))
+        .rejects.toThrow("already has this question");
+
+      expect(sampleIds((await admin.reviewQueue()).map(e => e.question.id))).toEqual(["demo-csv-no-working", "demo-duplicate-options"]);
+    });
+
+    it("lets only an admin change a topic's settings and the level bands", async () => {
+      const w = await newWorld();
+      const admin = await w.admin();
+      const b = await w.family();
+      const topicId = COUNTING.topic.id;
+      const harder = { ...defaultTopicSettings(topicId), passMarks: 46, passMarksMax: 64 };
+      await expect(b.saveTopicSettings(harder)).rejects.toThrow(/only an admin/i);
+      await expect(admin.saveTopicSettings({ ...harder, passMarks: 70 })).rejects.toThrow();
+      await admin.saveTopicSettings(harder);
+      expect((await b.topicSettings()).find(s => s.topicId === topicId)).toEqual(harder);
+
+      await expect(b.saveLevelBands({ l1: 80, l2: 60, l3: 45 })).rejects.toThrow(/only an admin/i);
+      await expect(admin.saveLevelBands({ l1: 60, l2: 80, l3: 45 })).rejects.toThrow();
+      await admin.saveLevelBands({ l1: 80, l2: 60, l3: 45 });
+      expect(await b.levelBands()).toEqual([
+        { level: 1, minRate: 0.8, maxRate: 1 }, { level: 2, minRate: 0.6, maxRate: 0.8 },
+        { level: 3, minRate: 0.45, maxRate: 0.6 }, { level: 4, minRate: 0, maxRate: 0.45 },
+      ]);
+    });
+
+    it("makes new questions when asked, for the asking family's own child, and logs it for the admin", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const riya = await b.createProfile(RIYA);
+      const topicId = "ukg-comparing";
+      const before = (await b.questions(topicId)).length;
+      const r = await b.newQuestions(topicId, riya.id);
+      expect(r).toMatchObject({ topicId, asked: 80 });
+      expect(r.added).toBeGreaterThan(0);
+      expect((await b.questions(topicId)).length).toBe(before + r.added);
+      await expect(b.newQuestions("ukg-nothing", riya.id)).rejects.toThrow("no question templates");
+
+      const other = await w.family();
+      await other.giveConsent(V);
+      await expect(other.newQuestions(topicId, riya.id)).rejects.toThrow("That profile isn't in this account.");
+
+      const admin = await w.admin();
+      expect((await admin.questionRequests(5))[0]).toMatchObject({ topicId, by: "child", added: r.added, sentToReview: r.sentToReview });
+      await expect(b.questionRequests()).rejects.toThrow(/only an admin/i);
     });
   });
 }

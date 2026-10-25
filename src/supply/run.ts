@@ -1,5 +1,6 @@
 import { contentKey, PER_LEVEL } from "../content/gen";
 import type { Level, TopicContent } from "../types";
+import type { CheckReport } from "../validation";
 import { checkQuestions } from "./check";
 import { parseQuestionCsv } from "./csv";
 import { bankQuestions, generateQuestions } from "./generate";
@@ -11,8 +12,10 @@ export interface ReviewItem {
   problems: string[];
 }
 
-const problemsOf = (c: CheckedQuestion) =>
-  (["answer", "options", "scope", "level", "wording"] as const).flatMap(k => c.report[k].problems);
+/** Every failed check's reasons, in the order the checks run. */
+export const reportProblems = (report: CheckReport) =>
+  (["answer", "options", "scope", "level", "wording"] as const).flatMap(k => report[k].problems);
+const problemsOf = (c: CheckedQuestion) => reportProblems(c.report);
 
 /** Questions that were saved (added or changed) but failed a check, so they wait for the admin. */
 function sentToReview(checked: CheckedQuestion[], saved: SaveResult): ReviewItem[] {

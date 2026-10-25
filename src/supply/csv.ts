@@ -144,13 +144,34 @@ export function parseQuestionCsv(
 
 const quote = (cell: string) => (/[",\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell);
 
+/** A picture as the CSV writes it, like "3 blue, 2 orange": the reverse of parsePicture. */
+export const pictureText = (v?: Visual) =>
+  v?.groups.map(g => `${g.count} ${g.color}${g.crossed ? ` ${g.crossed} crossed` : ""}`).join(", ") ?? "";
+
+/** A working as the CSV writes it: "count dots", a plain sum like "9 - 2 - 3", or JSON. The reverse of parseWorking. */
+export function workingText(w?: Working): string {
+  if (!w) return "";
+  if (w.kind === "count-dots") return "count dots";
+  if (w.kind === "arith") {
+    const chain = (e: Expr): string | null => {
+      if (typeof e === "number") return String(e);
+      if (typeof e !== "object" || !("op" in e)) return null;
+      const [head, ...rest] = e.args;
+      const start = chain(head);
+      return start !== null && rest.every(a => typeof a === "number") ? [start, ...rest].join(` ${e.op} `) : null;
+    };
+    // Written as a sum only when it reads back as the same working.
+    const text = chain(w.expr);
+    if (text !== null && /[+-]/.test(text) && JSON.stringify(parseWorking(text)) === JSON.stringify(w)) return text;
+  }
+  return JSON.stringify(w);
+}
+
 /** Writes questions as a CSV in the template's columns, so the admin can edit them in a spreadsheet. */
 export function toQuestionCsv(questions: SuppliedQuestion[]): string {
-  const picture = (v?: Visual) =>
-    v?.groups.map(g => `${g.count} ${g.color}${g.crossed ? ` ${g.crossed} crossed` : ""}`).join(", ") ?? "";
   const lines = questions.map(q => [
     q.id, q.topicId, String(q.level), q.subSkill, q.format, q.prompt, (q.options ?? []).join(" | "),
-    q.answers.join(" | "), q.hint, q.explanation, q.reason, picture(q.visual), q.working ? JSON.stringify(q.working) : "",
+    q.answers.join(" | "), q.hint, q.explanation, q.reason, pictureText(q.visual), q.working ? JSON.stringify(q.working) : "",
   ].map(quote).join(","));
   return [CSV_COLUMNS.join(","), ...lines].join("\n") + "\n";
 }
