@@ -1,0 +1,17 @@
+{
+  "name": "nitya",
+  "version": "0.1.0",
+  "description": "Adaptive maths learning and quiz app for children, LKG to Class 12",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc",
+    "preview": "node preview/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
