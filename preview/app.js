@@ -11,6 +11,26 @@ const screen = document.getElementById("screen");
 const side = document.getElementById("side");
 const stage = document.getElementById("stage");
 const tag = document.getElementById("tag");
+
+/* ---------- light and dark colours: light unless this device's switch says dark ---------- */
+const MODE_KEY = "nitya-mode";
+const modeBtn = document.getElementById("mode");
+const MOON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>`;
+const SUN = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>`;
+let colourMode = "light";
+try { if (storage.getItem(MODE_KEY) === "dark") colourMode = "dark"; } catch (e) {}
+function showMode() {
+  const dark = colourMode === "dark";
+  document.documentElement.dataset.mode = colourMode;
+  modeBtn.innerHTML = dark ? `${SUN}Light` : `${MOON}Dark`;
+  modeBtn.setAttribute("aria-label", dark ? "Switch to light colours" : "Switch to dark colours");
+}
+modeBtn.onclick = () => {
+  colourMode = colourMode === "dark" ? "light" : "dark";
+  try { storage.setItem(MODE_KEY, colourMode); } catch (e) {}
+  showMode();
+};
+showMode();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const byId = id => M.ALL_CONTENT.find(t => t.topic.id === id);

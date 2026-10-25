@@ -7,6 +7,9 @@
  *   play   bright and game-like, for LKG to Class 5: chunky buttons that press down, a trail of topics, the owl
  *   focus  clean and calm, for Class 6 up and for every grown-up screen: flat cards, rings, A/B/C answer keys
  * Only the tokens and the decoration change, never where things are.
+ * Each look has light and dark colours. Light is the default, as in the designs, and
+ * the switch in the top bar (<html data-mode="dark">) turns dark on for this device
+ * (cp, 2026-10-25). The device's own dark mode doesn't change it.
  */
 :root, :root[data-look="play"] {
   --sky: #ddf0ff; --card: #ffffff; --ink: #13234b; --muted: #3f5079;
@@ -24,6 +27,7 @@
   --bw: 3px; --bw-ghost: 2px; --node: 64px;
   --press: 0 5px 0 var(--shadow); --press-down: 0 2px 0 var(--shadow); --press-cta: 0 5px 0 var(--cta-deep);
   --lift: 0 6px 0 var(--shadow);
+  color-scheme: light;
 }
 :root[data-look="focus"] {
   --sky: #f6f7fb; --card: #ffffff; --ink: #0f172a; --muted: #475569;
@@ -42,31 +46,7 @@
   --press: none; --press-down: none; --press-cta: none;
   --lift: 0 0 0 1px var(--line-soft);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --sky: #0e1a2f; --card: #172540; --ink: #eef3ff; --muted: #a9b7d6;
-    --blue: #6f9bff; --blue-ink: #0e1a2f; --blue-soft: #1e2f52; --blue-mid: #3a5a94;
-    --sun: #ffd25e; --sun-soft: #5a4a1a; --sun-deep: #b8901f; --sun-ink: #13234b;
-    --leaf: #4fd39a; --leaf-node: #2fb873; --leaf-deep: #1d7a4a; --leaf-soft: #173b2e;
-    --coral: #ff9a76; --coral-line: #ff8a66; --coral-soft: #3d2620;
-    --line: #2c3e62; --line-soft: #24365a; --track: #22314f; --shadow: #0a1424;
-    --dot-blue: #7aa5ff; --dot-orange: #ffa766; --star: #ffc24d; --star-off: #3a4c70;
-    --cta: #34c77b; --cta-ink: #062814; --cta-deep: #1d7a4a; --ring: #8fb3ff;
-    color-scheme: dark;
-  }
-  :root[data-look="focus"]:not([data-theme="light"]) {
-    --sky: #0b1020; --card: #141a2e; --ink: #e8ecf6; --muted: #a3adc2;
-    --blue: #8b93ff; --blue-ink: #0b1020; --blue-soft: #1f2547; --blue-mid: #4b52a8;
-    --sun: #f5b544; --sun-soft: #3d3016; --sun-deep: #c98f2a; --sun-ink: #0b1020;
-    --leaf: #4ade80; --leaf-node: #22a55a; --leaf-deep: #22a55a; --leaf-soft: #12301f;
-    --coral: #ff8a7a; --coral-line: #ff8a7a; --coral-soft: #3a1f1c;
-    --line: #2a3350; --line-soft: #222a44; --track: #232b45; --shadow: transparent;
-    --dot-blue: #8b93ff; --dot-orange: #f5b544; --star: #f5b544; --star-off: #3a4562;
-    --cta: #8b93ff; --cta-ink: #0b1020; --cta-deep: #6b73e0; --ring: #a5acff;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
+:root[data-mode="dark"] {
   --sky: #0e1a2f; --card: #172540; --ink: #eef3ff; --muted: #a9b7d6;
   --blue: #6f9bff; --blue-ink: #0e1a2f; --blue-soft: #1e2f52; --blue-mid: #3a5a94;
   --sun: #ffd25e; --sun-soft: #5a4a1a; --sun-deep: #b8901f; --sun-ink: #13234b;
@@ -77,7 +57,7 @@
   --cta: #34c77b; --cta-ink: #062814; --cta-deep: #1d7a4a; --ring: #8fb3ff;
   color-scheme: dark;
 }
-:root[data-theme="dark"][data-look="focus"] {
+:root[data-mode="dark"][data-look="focus"] {
   --sky: #0b1020; --card: #141a2e; --ink: #e8ecf6; --muted: #a3adc2;
   --blue: #8b93ff; --blue-ink: #0b1020; --blue-soft: #1f2547; --blue-mid: #4b52a8;
   --sun: #f5b544; --sun-soft: #3d3016; --sun-deep: #c98f2a; --sun-ink: #0b1020;
@@ -100,6 +80,10 @@ body { background: var(--sky); color: var(--ink); font-family: var(--font-body);
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.5rem; }
 .tag { font-size: 0.85rem; color: var(--muted); }
+.top .brand { margin-right: auto; }
+.modebtn { min-height: 44px; padding: 0 14px; font-size: 0.9rem; }
+/* On a phone the switch stays beside the name and the note goes underneath. */
+@media (max-width: 520px) { .top .tag { order: 3; flex-basis: 100%; } }
 .stage { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 18px; align-items: start; }
 .stage.solo { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 780px) { .stage { grid-template-columns: 1fr; } }
@@ -402,6 +386,7 @@ input[type="number"], select {
       Nitya
     </div>
     <span class="tag" id="tag"></span>
+    <button class="ghost modebtn" type="button" id="mode"></button>
   </div>
   <div class="stage" id="stage">
     <main class="card" id="screen" aria-live="polite"></main>

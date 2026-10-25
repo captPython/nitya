@@ -109,6 +109,8 @@ A parent owns the account and signs in with Google or a one-time email link. Chi
 
 The class picks the look, so a child who moves up to Class 6 gets the clean look. A parent can choose either look for any child in that child's settings, or go back to letting the class decide. Grown-up screens (sign-in, the PIN, Grown-ups, settings and the admin panel) always use the clean look. After a wrong first try, both looks mark the answer the child tried, show the hint on its own card, and say that the second try won't change the marks.
 
+**Light and dark:** both looks start in light colours, as in the designs, whatever the device's own dark mode. The **Dark** switch in the top bar turns dark colours on, and **Light** turns them off again. The choice is kept on that device.
+
 Every quiz is saved as it is played: the play when it starts, each answer as it is given, and the marks and topic progress at the end. Practice rounds are saved too, but never change topic progress.
 
 ### The demo and the real app
