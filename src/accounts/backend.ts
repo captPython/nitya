@@ -79,9 +79,9 @@ export interface AccountBackend {
   newQuestions(topicId: string, profileId?: string): Promise<NewQuestionsResult>;
   /** The admin's defaults for every class. */
   classSettings(): Promise<ClassSettings[]>;
-  /** A parent's choice for one child, for all of that child's topics. */
+  /** A parent's choices for one child, for all of that child's topics: pass mark, marks off and look. */
   childSettings(profileId: string): Promise<ChildSettings>;
-  /** Saves a parent's choice for one child; nulls go back to the class default. */
+  /** Saves a parent's choices for one child; nulls go back to the class default. */
   saveChildSettings(profileId: string, settings: ChildSettings): Promise<void>;
 
   // The admin panel. Each of these refuses anyone who isn't an admin (levelBands is for everyone).

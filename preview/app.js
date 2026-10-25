@@ -11,11 +11,31 @@ const screen = document.getElementById("screen");
 const side = document.getElementById("side");
 const stage = document.getElementById("stage");
 const tag = document.getElementById("tag");
+
+/* ---------- light and dark colours: light unless this device's switch says dark ---------- */
+const MODE_KEY = "nitya-mode";
+const modeBtn = document.getElementById("mode");
+const MOON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>`;
+const SUN = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>`;
+let colourMode = "light";
+try { if (storage.getItem(MODE_KEY) === "dark") colourMode = "dark"; } catch (e) {}
+function showMode() {
+  const dark = colourMode === "dark";
+  document.documentElement.dataset.mode = colourMode;
+  modeBtn.innerHTML = dark ? `${SUN}Light` : `${MOON}Dark`;
+  modeBtn.setAttribute("aria-label", dark ? "Switch to light colours" : "Switch to dark colours");
+}
+modeBtn.onclick = () => {
+  colourMode = colourMode === "dark" ? "light" : "dark";
+  try { storage.setItem(MODE_KEY, colourMode); } catch (e) {}
+  showMode();
+};
+showMode();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const byId = id => M.ALL_CONTENT.find(t => t.topic.id === id);
 
-const MASCOT = `<svg width="60" height="60" viewBox="0 0 64 64" aria-hidden="true">
+const MASCOT = `<svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
   <ellipse cx="32" cy="36" rx="24" ry="24" fill="var(--sun)"/>
   <circle cx="23" cy="30" r="8" fill="var(--card)"/><circle cx="41" cy="30" r="8" fill="var(--card)"/>
   <circle cx="24" cy="31" r="4" fill="var(--ink)"/><circle cx="40" cy="31" r="4" fill="var(--ink)"/>
@@ -121,13 +141,14 @@ async function askNewQuestions(topicId, profileId) {
 function speak(text) {
   try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; speechSynthesis.speak(u); } catch (e) {}
 }
-const listenBtn = text => `<button class="ghost" type="button" data-say="${esc(text)}">Listen</button>`;
+const SPEAKER = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>`;
+const listenBtn = text => `<button class="ghost" type="button" data-say="${esc(text)}">${SPEAKER}Listen</button>`;
 screen.addEventListener("click", e => { const b = e.target.closest("[data-say]"); if (b) speak(b.dataset.say); });
 
 /* ---------- dots ---------- */
 function dotsSvg(visual) {
   if (!visual) return "";
-  const R = 11, G = 6, STEP = 2 * R + G, GROUP_GAP = 30;
+  const R = 14, G = 7, STEP = 2 * R + G, GROUP_GAP = 34;
   let x = 0, h = 0;
   const parts = [];
   visual.groups.forEach((g, gi) => {
@@ -147,6 +168,21 @@ function dotsSvg(visual) {
 }
 
 const errorLine = () => (app.error ? `<p class="error" role="alert">${esc(app.error)}</p>` : "");
+
+/* ---------- answer options and feedback, shared by the lesson, the quiz and the placement check ---------- */
+const KEYS = "ABCD";
+/** One answer button. The clean look shows its key (A, B, C) and lets a keyboard press it. */
+function optionButtons(options, attr, { disabled = false, tried = null } = {}) {
+  return `<div class="opts">${options.map((o, i) => `<button class="btn ${String(o).length > 3 ? "long" : ""}" type="button" ${attr}="${esc(o)}" ${disabled ? "disabled" : ""}>
+    <span class="key" aria-hidden="true">${KEYS[i] ?? ""}</span><span>${esc(o)}</span>${o === tried ? `<span class="tried-note">tried</span>` : ""}</button>`).join("")}</div>`;
+}
+const keyHint = n => `<p class="keyhint small muted">Tap an answer, or press ${[...KEYS.slice(0, n)].join(", ").replace(/, ([^,]*)$/, " or $1")}.</p>`;
+
+const ICON_GOOD = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--leaf)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>`;
+const ICON_HINT = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--coral)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg>`;
+/** A feedback card: "good" after a right answer, "gentle" with a hint or the worked answer. `note` is a small line under it. */
+const feedbackCard = (kind, title, body, note = "") =>
+  `<div class="feedback ${kind}">${kind === "good" ? ICON_GOOD : ICON_HINT}<div><b class="fb-title">${title}</b>${body}${note ? `<p class="fb-note">${note}</p>` : ""}</div></div>`;
 
 /* ---------- sign-in ---------- */
 function renderSignin() {
@@ -303,7 +339,7 @@ function renderPin() {
 function renderProfiles() {
   screen.innerHTML = `<div class="narrow" style="max-width:720px">
     <h1>Who's playing?</h1>
-    <div class="kids">${profiles.map(p => `<button class="btn kid" type="button" data-kid="${p.id}">
+    <div class="kids">${profiles.map(p => `<button class="btn kid-btn" type="button" data-kid="${p.id}">
       <span class="emoji" aria-hidden="true">${M.avatarEmoji(p.avatar)}</span>${esc(p.nickname)}<small class="muted small">${esc(className(p.classId))}</small></button>`).join("")}</div>
     ${errorLine()}
     <div class="row"><button class="ghost" type="button" id="add">Add a child</button>
@@ -424,7 +460,7 @@ function renderPlacement() {
     <div class="steps">${app.qs.map((_, i) => `<span class="${i < app.i ? "on" : ""}"></span>`).join("")}</div>
     <div class="mascot">${MASCOT}<div class="bubble"><p class="prompt">${esc(q.prompt)}</p></div></div>
     ${dotsSvg(q.visual)}
-    <div class="opts">${q.options.map(o => `<button class="btn" type="button" data-opt="${esc(o)}">${esc(o)}</button>`).join("")}</div>
+    ${optionButtons(q.options, "data-opt")}
     <div class="row">${listenBtn(q.prompt)}</div>
     <p class="small muted">No marks here. Just do your best!</p>`;
   screen.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
@@ -450,6 +486,18 @@ function renderPlacementResult() {
 }
 
 /* ---------- grown-ups ---------- */
+const icon = d => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  settings: icon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`),
+  edit: icon(`<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>`),
+  download: icon(`<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>`),
+  trash: icon(`<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>`),
+  plus: icon(`<path d="M12 5v14M5 12h14"/>`),
+  lock: icon(`<rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>`),
+  out: icon(`<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/>`),
+  arrow: icon(`<path d="M5 12h14M13 6l6 6-6 6"/>`),
+};
+
 function download(name, value) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
   const a = Object.assign(document.createElement("a"), { href: url, download: name });
@@ -469,20 +517,22 @@ function renderGrownups() {
       <span class="emoji" aria-hidden="true">${M.avatarEmoji(p.avatar)}</span>
       <div><b>${esc(p.nickname)}</b><div class="small muted">${esc(className(p.classId))} · ${esc(M.BOARDS.find(b => b.id === p.board)?.name ?? p.board)} · ${esc(M.LANGUAGES.find(l => l.id === p.language)?.name ?? p.language)}</div></div>
       <div class="row">
-        <button class="ghost" type="button" data-edit="${p.id}">Edit</button>
-        <button class="ghost" type="button" data-settings="${p.id}">Quiz settings</button>
-        <button class="ghost" type="button" data-download="${p.id}">Download data</button>
-        <button class="ghost" type="button" data-delete="${p.id}">${app.confirmDelete === p.id ? `Tap again to delete ${esc(p.nickname)}` : "Delete"}</button>
-      </div></div>`).join("")}</div>
+        <button class="ghost tonal" type="button" data-settings="${p.id}">${ICONS.settings}Settings</button>
+        <button class="ghost" type="button" data-edit="${p.id}">${ICONS.edit}Edit<span class="roomy"> profile</span></button>
+      </div>
+      <div class="row member-more">
+        <button class="ghost quiet" type="button" data-download="${p.id}">${ICONS.download}Download<span class="roomy"> data</span></button>
+        <button class="ghost quiet danger ${app.confirmDelete === p.id ? "sure" : ""}" type="button" data-delete="${p.id}">${ICONS.trash}${app.confirmDelete === p.id ? `Tap again to delete ${esc(p.nickname)}` : "Delete"}</button>
+      </div></div>`).join("")}
+      <button class="ghost addkid" type="button" id="add">${ICONS.plus}Add a child</button></div>
     ${app.exported ? `<details><summary>Show ${esc(app.exported.name)}'s data</summary><pre class="data">${esc(JSON.stringify(app.exported.value, null, 2))}</pre></details>` : ""}
-    <div class="row"><button class="ghost" type="button" id="add">Add a child</button>
-      <button class="ghost" type="button" id="pin">Change the PIN</button>
-      <button class="ghost" type="button" id="signout">Sign out</button></div>
     ${account.isAdmin
       ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each class's default pass mark and marks off, and set the level bands.</p>
-          <div class="row"><button class="ghost" type="button" id="admin">Open the admin panel</button></div></div>`
+          <div class="row"><button class="ghost tonal" type="button" id="admin">Open the admin panel${ICONS.arrow}</button></div></div>`
       : DEMO ? `<div class="panel"><span class="label">Admin (demo)</span><p class="small muted">In the real app only Nitya's admin sees the admin panel. In the demo you can try it.</p>
-          <div class="row"><button class="ghost" type="button" id="demoadmin">Make me the admin</button></div></div>` : ""}
+          <div class="row"><button class="ghost tonal" type="button" id="demoadmin">Make me the admin${ICONS.arrow}</button></div></div>` : ""}
+    <div class="row account"><button class="ghost quiet" type="button" id="pin">${ICONS.lock}Change the PIN</button>
+      <button class="ghost quiet" type="button" id="signout">${ICONS.out}Sign out</button></div>
     <div class="row"><button class="btn primary" type="button" id="done">${child ? `Back to ${esc(child.nickname)}` : "Choose a child"}</button></div>
   </div>`;
   screen.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(profiles.find(p => p.id === b.dataset.edit)));
@@ -540,8 +590,14 @@ function renderChildSettings() {
   const lim = M.QUIZ_LIMITS, MAX = M.maxMarks(p.classId);
   const percent = app.mine.passPercent ?? def.passPercent;
   const changed = app.mine.passPercent !== null || app.mine.wrongPenalty !== null;
+  const byClass = M.classLook(p.classId);
+  const looks = [
+    [null, `Follow the class: ${LOOK_NAMES[byClass].toLowerCase()} for ${cls}`, "Playful up to Class 5, clean from Class 6.", byClass],
+    ["play", LOOK_NAMES.play, "Bright colours, big buttons and the owl.", "play"],
+    ["focus", LOOK_NAMES.focus, "Calm colours, simple cards and A/B/C answers.", "focus"],
+  ];
   screen.innerHTML = `<div class="narrow">
-    <span class="label">Grown-ups</span><h1>Quiz settings for ${name}</h1>
+    <span class="label">Grown-ups</span><h1>Settings for ${name}</h1>
     <p class="muted">These apply to every topic ${name} plays, from the next quiz. Choose what fits ${name}: higher to push further, lower to make it easier.</p>
     <div class="setting">
       <div class="row" style="justify-content:space-between"><h3>${name}'s quizzes</h3>${changed ? `<span class="chip current">Changed</span>` : ""}</div>
@@ -552,11 +608,19 @@ function renderChildSettings() {
       <p class="small muted">${percent}% is ${eff.passMarks} of the ${MAX} marks a quiz can give. ${cls}'s default is ${def.passPercent}% to pass and ${def.wrongPenalty} ${def.wrongPenalty === 1 ? "mark" : "marks"} off for a wrong first try. A pass mark can be ${lim.passPercent.min}% to ${lim.passPercent.max}%, and marks off ${lim.wrongPenalty.min} to ${lim.wrongPenalty.max}.</p>
       ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
       ${errorLine()}
-      <div class="row"><button class="ghost" type="button" id="savemine">Save</button>
-        ${changed ? `<button class="ghost" type="button" id="usedefault">Use ${cls}'s default</button>` : ""}</div>
+      <div class="row"><button class="ghost tonal" type="button" id="savemine">Save</button>
+        ${changed ? `<button class="ghost quiet" type="button" id="usedefault">Use ${cls}'s default</button>` : ""}</div>
+    </div>
+    <div class="setting">
+      <h3>How Nitya looks for ${name}</h3>
+      <div class="looks" role="group" aria-label="Look">${looks.map(([id, title, text, swatch]) => `
+        <button class="ghost ${app.mine.look === id ? "on" : ""}" type="button" data-pick-look="${id ?? ""}" aria-pressed="${app.mine.look === id}">
+          <span class="swatch ${swatch}" aria-hidden="true"></span><span><span>${esc(title)}</span><small>${esc(text)}</small></span></button>`).join("")}</div>
+      ${app.lookNote ? `<p class="note" role="status">${esc(app.lookNote)}</p>` : ""}
     </div>
     <div class="row"><button class="btn primary" type="button" id="done">Back to Grown-ups</button></div>
   </div>`;
+  screen.querySelectorAll("[data-pick-look]").forEach(b => b.onclick = () => saveLook(b.dataset.pickLook || null));
   document.getElementById("savemine").onclick = () => saveMine(def, {
     passPercent: Number(document.getElementById("my-pass").value), wrongPenalty: Number(document.getElementById("my-pen").value),
   });
@@ -566,7 +630,7 @@ function renderChildSettings() {
 }
 
 function saveMine(def, choice) {
-  const next = { ...choice };
+  const next = { ...choice, look: app.mine.look };
   // The default, chosen again, is kept as "the default", so it follows the admin's.
   if (next.passPercent === def.passPercent) next.passPercent = null;
   if (next.wrongPenalty === def.wrongPenalty) next.wrongPenalty = null;
@@ -578,6 +642,25 @@ function saveMine(def, choice) {
     app.mine = next;
     if (child && child.id === profileId) settings.child = next;
     app.note = next.passPercent === null && next.wrongPenalty === null ? `Saved. ${app.profile.nickname} uses the class default.` : "Saved.";
+    app.error = null;
+    app.lookNote = null;
+    render();
+  });
+}
+
+const LOOK_NAMES = { play: "Playful", focus: "Clean" };
+
+/** Saves the look for the child on this page; null lets the class decide. */
+function saveLook(choice) {
+  const p = app.profile;
+  const next = { ...app.mine, look: choice };
+  step(async () => {
+    await backend.saveChildSettings(p.id, next);
+    app.mine = next;
+    if (child && child.id === p.id) settings.child = next;
+    const shown = M.lookFor(p.classId, choice);
+    app.lookNote = `Saved. ${p.nickname} sees the ${LOOK_NAMES[shown].toLowerCase()} look${choice ? "" : `, chosen by ${className(p.classId)}`}.`;
+    app.note = null;
     app.error = null;
     render();
   });
@@ -899,8 +982,10 @@ function renderDash() {
       ? `<button class="chipbtn" type="button" data-open="${t.id}">${e.attempts ? "Try again" : "Start"}</button>`
       : e.state === "cleared" ? `<button class="chipbtn soft" type="button" data-open="${t.id}">Practise</button>` : "";
     const newq = e.state === "locked" ? "" : `<button class="linkbtn" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "New questions"}</button>`;
+    // The clean look's ring fills with the best score so far.
+    const ring = e.state === "cleared" ? 100 : Math.round(bestPct);
     return `<div class="topic ${e.state}">
-      <span class="num" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>
+      <span class="num" style="--p:${ring}" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>
       <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
       <div class="act">${act}${newq}</div></div>`;
   }).join("");
@@ -934,17 +1019,19 @@ function renderDash() {
         <button class="ghost" type="button" id="grownups">Grown-ups</button></div></div>
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
     ${app.newqNote ? `<p class="note" role="status">${esc(app.newqNote)}</p>` : ""}
-    <div class="dash-head">
-      <div style="display:grid;gap:4px"><span class="label">Class dashboard</span><h1>${esc(cls)} Maths</h1></div>
-      <div class="row" style="gap:24px">
-        <div><div class="bigstat">${clearedCount} / ${topics.length}</div><div class="small muted">topics cleared</div></div>
-        <div><div class="bigstat" style="color:var(--sun)">★ ${totalStars}</div><div class="small muted">stars</div></div>
+    <section class="block">
+      <div class="dash-head">
+        <div style="display:grid;gap:4px"><span class="label">Class dashboard</span><h1>${esc(cls)} Maths</h1></div>
+        <div class="row" style="gap:24px">
+          <div><div class="bigstat">${clearedCount} / ${topics.length}</div><div class="small muted">topics cleared</div></div>
+          <div><div class="bigstat"><span style="color:var(--star)" aria-hidden="true">★</span> ${totalStars}</div><div class="small muted">stars</div></div>
+        </div>
       </div>
-    </div>
-    <div class="overall">
-      <div class="segs" aria-label="${clearedCount} of ${topics.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
-      <p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. Each quiz needs ${passPercent()}% (${pass} of ${MAX} marks).`}</p>
-    </div>
+      <div class="overall">
+        <div class="segs" style="--n:${topics.length}" aria-label="${clearedCount} of ${topics.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
+        <p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. Each quiz needs ${passPercent()}% (${pass} of ${MAX} marks).`}</p>
+      </div>
+    </section>
     <div class="topics">${rows}</div>
     <div class="panels">
       <div class="panel"><span class="label">Improvement areas</span>${areasHtml}</div>
@@ -983,7 +1070,7 @@ function renderLesson() {
     screen.innerHTML = `${crumbs}
       <div class="mascot">${MASCOT}<div class="bubble"><span class="label">Try it</span><p class="prompt">${esc(t.prompt)}</p></div></div>
       ${dotsSvg(t.visual)}
-      <div class="opts">${t.options.map(o => `<button class="btn" type="button" data-try="${esc(o)}">${esc(o)}</button>`).join("")}</div>
+      ${optionButtons(t.options, "data-try")}
       <div id="tryfb"></div>
       <div class="row">${listenBtn(t.prompt)}<button class="ghost" type="button" id="back">Back</button></div>`;
     document.getElementById("back").onclick = () => { app.page--; render(); };
@@ -991,12 +1078,12 @@ function renderLesson() {
       const fb = document.getElementById("tryfb");
       if (b.dataset.try === t.answer) {
         b.classList.add("right");
-        fb.innerHTML = `<div class="feedback good"><b>You got it!</b> ${esc(t.praise)}</div>
+        fb.innerHTML = `${feedbackCard("good", "You got it!", esc(t.praise))}
           <div class="row" style="margin-top:12px"><button class="btn primary" type="button" id="go">${app.peek ? "Back to my question" : "Start the quiz"}</button></div>`;
         document.getElementById("go").onclick = () => app.peek ? backToQuiz() : startQuiz(app.topicId);
       } else {
         b.classList.add("tried");
-        fb.innerHTML = `<div class="feedback gentle"><b>Let's look again.</b> ${esc(t.help)} Try again!</div>`;
+        fb.innerHTML = feedbackCard("gentle", "Let's look again.", `${esc(t.help)} Try again!`);
       }
     });
   }
@@ -1036,23 +1123,35 @@ function renderQuiz() {
   const qNo = app.phase === "ask" ? s.asked.length + 1 : s.asked.length;
   const locked = app.phase === "done";
   const c = byId(app.topicId);
+  const done = s.asked.length - (app.phase === "retry" ? 1 : 0);
+  const tried = app.phase === "retry" ? app.tried : null;
   screen.innerHTML = `
-    <div class="row" style="justify-content:space-between">
-      <span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(c.subSkillNames[app.practiceSkill])}` : ""} · Question ${qNo} of ${total}</span>
+    <div class="qtop">
+      <div class="qtitle"><span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(c.subSkillNames[app.practiceSkill])}` : ""}</span>
+        <b>Question ${qNo} of ${total}</b></div>
       <button class="ghost" type="button" id="relesson">See the lesson</button></div>
+    <div class="qprog" role="progressbar" aria-label="Questions done" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">${
+      Array.from({ length: total }, (_, i) => `<span class="${i < done ? "done" : i === done ? "now" : ""}"></span>`).join("")}</div>
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
     ${practice ? "" : marksBar()}
     <div class="mascot">${MASCOT}<div class="bubble"><span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span><p class="prompt">${esc(q.prompt)}</p></div></div>
     ${dotsSvg(q.visual)}
-    <div class="opts">${q.options.map(o => `<button class="btn" type="button" data-opt="${esc(o)}" ${locked ? "disabled" : ""}>${esc(o)}</button>`).join("")}</div>
+    ${optionButtons(q.options, "data-opt", { disabled: locked, tried })}
+    ${locked ? "" : keyHint(q.options.length)}
     <div id="fb">${app.feedback ?? ""}</div>
     <div class="row">${listenBtn(q.prompt)}${locked ? `<button class="btn primary" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button>` : ""}</div>`;
 
   if (locked) screen.querySelectorAll("[data-opt]").forEach(b => { if (q.answers.includes(b.dataset.opt)) b.classList.add("right"); });
-  if (app.phase === "retry" && app.tried) {
-    const t = [...screen.querySelectorAll("[data-opt]")].find(b => b.dataset.opt === app.tried);
+  if (tried) {
+    const t = [...screen.querySelectorAll("[data-opt]")].find(b => b.dataset.opt === tried);
     if (t) { t.classList.add("tried"); t.disabled = true; }
   }
+  // The clean look's A/B/C keys answer from a keyboard. The playful look leaves keys alone, for little hands on a laptop.
+  if (look() === "focus") document.onkeydown = e => {
+    if (app.mode !== "quiz" || e.ctrlKey || e.metaKey || e.altKey) return;
+    const b = screen.querySelectorAll("[data-opt]")[KEYS.indexOf(e.key.toUpperCase())];
+    if (e.key.length === 1 && b && !b.disabled) b.click();
+  };
   const fill = document.getElementById("fill");
   if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = (Math.min(s.marks, maxMarks()) / maxMarks()) * 100 + "%"; }));
 
@@ -1072,11 +1171,12 @@ function answer(choice) {
     if (r.result.kind === "praise") {
       saveResponse(q);
       app.phase = "done";
-      app.feedback = `<div class="feedback good"><b>${pick(["Super!", "Well done!", "Brilliant!", "Yes!"])}</b> ${esc(r.result.reason)}</div>`;
+      app.feedback = feedbackCard("good", pick(["Super!", "Well done!", "Brilliant!", "Yes!"]), esc(r.result.reason));
     } else {
       app.phase = "retry";
       app.tried = choice;
-      app.feedback = `<div class="feedback gentle"><b>Nice try! Here's a hint.</b> ${esc(r.result.hint)} Have another go.</div>`;
+      // The retry never changes the marks (see answerRetry), so the child can try without worry.
+      app.feedback = feedbackCard("gentle", "Nice try! Here's a hint.", `${esc(r.result.hint)} Have another go.`, "This try is for practice. It won't change your marks.");
     }
   } else if (app.phase === "retry") {
     const r = M.answerRetry(app.state, q, choice);
@@ -1084,8 +1184,8 @@ function answer(choice) {
     saveResponse(q);
     app.phase = "done";
     app.feedback = r.retryCorrect
-      ? `<div class="feedback good"><b>You worked it out!</b> ${esc(r.explanation)}</div>`
-      : `<div class="feedback gentle"><b>Let's do it together.</b> ${esc(r.explanation)} The answer is <b>${esc(r.answer)}</b>.</div>`;
+      ? feedbackCard("good", "You worked it out!", esc(r.explanation))
+      : feedbackCard("gentle", "Let's do it together.", `${esc(r.explanation)} The answer is <b>${esc(r.answer)}</b>.`);
   }
   render();
 }
@@ -1208,8 +1308,22 @@ const SCREENS = {
   dash: renderDash, lesson: renderLesson, quiz: renderQuiz, result: renderResult, "practice-done": renderPracticeDone,
 };
 
+/* ---------- the two looks ---------- */
+// A child's own screens float on the page in the child's look; grown-up screens use the clean look.
+const KID_SCREENS = ["profiles", "placement-offer", "placement", "placement-result", "dash", "lesson", "quiz", "result", "practice-done"];
+const PLAYING = ["dash", "lesson", "quiz", "result", "practice-done"];
+
+function look() {
+  if (PLAYING.includes(app.mode) && child) return M.lookFor(child.classId, settings.child?.look);
+  if (app.mode.startsWith("placement") && app.draft?.classId) return M.classLook(app.draft.classId);
+  if (app.mode === "profiles") return profiles.some(p => M.classLook(p.classId) === "play") ? "play" : "focus";
+  return "focus";
+}
+
 function render() {
   if (!["pin", "set-pin"].includes(app.mode)) document.onkeydown = null;
+  document.documentElement.dataset.look = look();
+  screen.classList.toggle("kid", KID_SCREENS.includes(app.mode));
   (SCREENS[app.mode] || SCREENS.error)();
   renderSide();
   tag.textContent = DEMO ? "Demo · everything stays in this browser" : account?.email ?? "";

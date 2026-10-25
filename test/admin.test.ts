@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { applyEdits, canFixHere, editsOf, recheck } from "../src/admin/review";
 import {
   bandCutsProblem, bandsOf, childSettingsProblem, classSettingsProblems, cutsOf, defaultClassSettings, effectiveSettings, passMarksFor, QUIZ_LIMITS,
+  type ChildSettings,
 } from "../src/admin/settings";
+import { classLook, lookFor, type Look } from "../src/looks";
+import { CLASS_ORDER } from "../src/types";
 import { DEMO_REVIEW_SAMPLES } from "../src/accounts/demo-samples";
 import { ALL_CONTENT } from "../src/content";
 import { parseWorking, topicInfo, workingText } from "../src/supply";
@@ -35,12 +38,32 @@ describe("class settings", () => {
 
   it("keep any choice inside what a quiz allows: 1% to 100%, and 0 to 4 marks off", () => {
     expect(QUIZ_LIMITS).toEqual({ passPercent: { min: 1, max: 100 }, wrongPenalty: { min: 0, max: 4 } });
-    for (const ok of [none, { passPercent: 1, wrongPenalty: 0 }, { passPercent: 100, wrongPenalty: 4 }]) expect(childSettingsProblem(ok)).toBeNull();
-    expect(childSettingsProblem({ passPercent: 0, wrongPenalty: null })).toBe("The pass mark can be 1% to 100%.");
-    expect(childSettingsProblem({ passPercent: 101, wrongPenalty: null })).toBe("The pass mark can be 1% to 100%.");
-    expect(childSettingsProblem({ passPercent: 70.5, wrongPenalty: null })).toBe("The pass mark can be 1% to 100%.");
-    expect(childSettingsProblem({ passPercent: null, wrongPenalty: 5 })).toBe("Marks off can be 0 to 4.");
+    const child = (c: Partial<ChildSettings>): ChildSettings => ({ ...none, look: null, ...c });
+    for (const ok of [child({}), child({ passPercent: 1, wrongPenalty: 0 }), child({ passPercent: 100, wrongPenalty: 4 })]) expect(childSettingsProblem(ok)).toBeNull();
+    expect(childSettingsProblem(child({ passPercent: 0 }))).toBe("The pass mark can be 1% to 100%.");
+    expect(childSettingsProblem(child({ passPercent: 101 }))).toBe("The pass mark can be 1% to 100%.");
+    expect(childSettingsProblem(child({ passPercent: 70.5 }))).toBe("The pass mark can be 1% to 100%.");
+    expect(childSettingsProblem(child({ wrongPenalty: 5 }))).toBe("Marks off can be 0 to 4.");
+    expect(childSettingsProblem(child({ look: "focus" }))).toBeNull();
+    expect(childSettingsProblem(child({ look: "dark" as Look }))).toBe("The look can be playful or clean.");
     expect(classSettingsProblems({ ...UKG, passPercent: 101, wrongPenalty: -1 })).toEqual(["The pass mark can be 1% to 100%.", "Marks off can be 0 to 4."]);
+  });
+});
+
+describe("looks", () => {
+  it("are playful up to Class 5 and clean from Class 6", () => {
+    expect(CLASS_ORDER.map(classLook)).toEqual([
+      "play", "play", "play", "play", "play", "play", "play", "focus", "focus", "focus", "focus", "focus", "focus", "focus",
+    ]);
+    expect(classLook("C5")).toBe("play");
+    expect(classLook("C6")).toBe("focus");
+  });
+
+  it("follow the parent's choice for a child, either way", () => {
+    expect(lookFor("UKG", null)).toBe("play");
+    expect(lookFor("UKG", "focus")).toBe("focus");
+    expect(lookFor("C8", "play")).toBe("play");
+    expect(lookFor("C8")).toBe("focus");
   });
 });
 

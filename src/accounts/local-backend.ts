@@ -185,14 +185,14 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
     },
     async classSettings() { signedIn(); return bank.classSettings(); },
     async childSettings(profileId) {
-      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, ...p.quiz?.[profileId] }; });
+      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, look: null, ...p.quiz?.[profileId] }; });
     },
     async saveChildSettings(profileId, c) {
       change((_, p) => {
         own(p, profileId);
         const problem = childSettingsProblem(c);
         if (problem) throw new Error(problem);
-        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty };
+        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty, look: c.look };
       });
     },
 

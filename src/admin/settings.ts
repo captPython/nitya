@@ -1,4 +1,5 @@
 import { MARKS_BY_LEVEL, WRONG_PENALTY, maxMarks } from "../engine";
+import { isLook, type Look } from "../looks";
 import type { ClassId, Level } from "../types";
 import { DEFAULT_BANDS, type LevelBand } from "../validation";
 
@@ -13,10 +14,12 @@ export interface ClassSettings {
   wrongPenalty: number;
 }
 
-/** A parent's choice for one child, for all of that child's topics. Null means the class default. */
+/** A parent's choices for one child, for all of that child's topics. Null means the class default. */
 export interface ChildSettings {
   passPercent: number | null;
   wrongPenalty: number | null;
+  /** Null means the class decides: playful up to Class 5, clean from Class 6. */
+  look: Look | null;
 }
 
 /** What a quiz uses. */
@@ -45,7 +48,7 @@ export const QUIZ_LIMITS = {
 };
 
 /** The parent's choice if set, else the class default, as the database's effective_quiz_settings does. */
-export function effectiveSettings(c: ClassSettings, child?: ChildSettings | null): QuizSettings {
+export function effectiveSettings(c: ClassSettings, child?: Pick<ChildSettings, "passPercent" | "wrongPenalty"> | null): QuizSettings {
   return { passMarks: passMarksFor(c.classId, child?.passPercent ?? c.passPercent), wrongPenalty: child?.wrongPenalty ?? c.wrongPenalty };
 }
 
@@ -53,11 +56,12 @@ const whole = (v: number) => Number.isInteger(v);
 type Range = { min: number; max: number };
 const outside = (v: number, r: Range) => !whole(v) || v < r.min || v > r.max;
 
-function problems(s: ChildSettings): string[] {
+function problems(s: Omit<ChildSettings, "look"> & { look?: unknown }): string[] {
   const r = QUIZ_LIMITS;
   const out: string[] = [];
   if (s.passPercent !== null && outside(s.passPercent, r.passPercent)) out.push(`The pass mark can be ${r.passPercent.min}% to ${r.passPercent.max}%.`);
   if (s.wrongPenalty !== null && outside(s.wrongPenalty, r.wrongPenalty)) out.push(`Marks off can be ${r.wrongPenalty.min} to ${r.wrongPenalty.max}.`);
+  if (s.look != null && !isLook(s.look)) out.push("The look can be playful or clean.");
   return out;
 }
 

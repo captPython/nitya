@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { applyEdits, editsOf, recheck } from "../src/admin/review";
-import { defaultClassSettings } from "../src/admin/settings";
+import { defaultClassSettings, type ChildSettings } from "../src/admin/settings";
 import { DEMO_REVIEW_SAMPLES } from "../src/accounts/demo-samples";
 import { ALL_CONTENT } from "../src/content";
 import { UKG_TOPICS } from "../src/content/ukg";
 import type { AccountBackend } from "../src/accounts/backend";
 import type { ProfileDetails } from "../src/accounts/options";
+import type { Look } from "../src/looks";
 import { topicInfo } from "../src/supply";
 import { CLASS_ORDER } from "../src/types";
 import { DEFAULT_BANDS } from "../src/validation";
@@ -142,27 +143,44 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       await b.giveConsent(V);
       const riya = await b.createProfile(RIYA);
       const kabir = await b.createProfile(KABIR);
-      const none = { passPercent: null, wrongPenalty: null };
+      const none = { passPercent: null, wrongPenalty: null, look: null };
+      const choose = (c: Partial<ChildSettings>): ChildSettings => ({ ...none, ...c });
       expect(await b.childSettings(riya.id)).toEqual(none);
-      await b.saveChildSettings(riya.id, { passPercent: 80, wrongPenalty: 2 });
-      expect(await b.childSettings(riya.id)).toEqual({ passPercent: 80, wrongPenalty: 2 });
+      await b.saveChildSettings(riya.id, choose({ passPercent: 80, wrongPenalty: 2 }));
+      expect(await b.childSettings(riya.id)).toEqual(choose({ passPercent: 80, wrongPenalty: 2 }));
       expect(await b.childSettings(kabir.id)).toEqual(none);
-      await expect(b.saveChildSettings(riya.id, { passPercent: 101, wrongPenalty: null })).rejects.toThrow("1% to 100%");
-      await expect(b.saveChildSettings(riya.id, { passPercent: 0, wrongPenalty: null })).rejects.toThrow("1% to 100%");
-      await expect(b.saveChildSettings(riya.id, { passPercent: null, wrongPenalty: 5 })).rejects.toThrow("0 to 4");
-      expect(await b.childSettings(riya.id)).toEqual({ passPercent: 80, wrongPenalty: 2 });
+      await expect(b.saveChildSettings(riya.id, choose({ passPercent: 101 }))).rejects.toThrow("1% to 100%");
+      await expect(b.saveChildSettings(riya.id, choose({ passPercent: 0 }))).rejects.toThrow("1% to 100%");
+      await expect(b.saveChildSettings(riya.id, choose({ wrongPenalty: 5 }))).rejects.toThrow("0 to 4");
+      expect(await b.childSettings(riya.id)).toEqual(choose({ passPercent: 80, wrongPenalty: 2 }));
       // Easier than the default is fine too.
-      await b.saveChildSettings(kabir.id, { passPercent: 50, wrongPenalty: 0 });
-      expect(await b.childSettings(kabir.id)).toEqual({ passPercent: 50, wrongPenalty: 0 });
+      await b.saveChildSettings(kabir.id, choose({ passPercent: 50, wrongPenalty: 0 }));
+      expect(await b.childSettings(kabir.id)).toEqual(choose({ passPercent: 50, wrongPenalty: 0 }));
       // Editing the profile keeps the choice.
       await b.updateProfile(riya.id, { ...RIYA, nickname: "Riya S" });
-      expect(await b.childSettings(riya.id)).toEqual({ passPercent: 80, wrongPenalty: 2 });
+      expect(await b.childSettings(riya.id)).toEqual(choose({ passPercent: 80, wrongPenalty: 2 }));
       const other = await w.family();
       await other.giveConsent(V);
-      await expect(other.saveChildSettings(riya.id, { passPercent: 90, wrongPenalty: null })).rejects.toThrow("isn't in this account");
+      await expect(other.saveChildSettings(riya.id, choose({ passPercent: 90 }))).rejects.toThrow("isn't in this account");
       await expect(other.childSettings(riya.id)).rejects.toThrow("isn't in this account");
       await b.saveChildSettings(riya.id, none);
       expect(await b.childSettings(riya.id)).toEqual(none);
+    });
+
+    it("keeps a parent's choice of look for each child, with the class deciding until then", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const riya = await b.createProfile(RIYA);
+      const kabir = await b.createProfile(KABIR);
+      const quiz = { passPercent: 75, wrongPenalty: null };
+      await b.saveChildSettings(riya.id, { ...quiz, look: "focus" });
+      expect(await b.childSettings(riya.id)).toEqual({ ...quiz, look: "focus" });
+      expect((await b.childSettings(kabir.id)).look).toBeNull();
+      await expect(b.saveChildSettings(kabir.id, { ...quiz, look: "neon" as Look })).rejects.toThrow("playful or clean");
+      expect((await b.childSettings(kabir.id)).look).toBeNull();
+      await b.saveChildSettings(riya.id, { ...quiz, look: null });
+      expect(await b.childSettings(riya.id)).toEqual({ ...quiz, look: null });
     });
 
     it("lets only an admin see the review queue", async () => {
