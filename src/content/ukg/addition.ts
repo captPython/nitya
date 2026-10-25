@@ -1,5 +1,5 @@
 import type { TopicContent } from "../../types";
-import { buildBank, dots, int, NAMES, numOptions, pick, shuffle, THINGS, type Template } from "../gen";
+import { add, arith, buildBank, dots, int, NAMES, numOptions, pick, shuffle, THINGS, type Template } from "../gen";
 
 const ID = "ukg-addition-10";
 
@@ -14,6 +14,7 @@ const countAll: Template = r => {
     hint: "Touch every dot as you count, both colours.",
     explanation: `Count them all: ${Array.from({ length: a + b }, (_, i) => i + 1).join(", ")}. So ${a} + ${b} = ${a + b}.`,
     reason: `${a} and ${b} more make ${a + b}.`,
+    working: { kind: "count-dots" },
   };
 };
 
@@ -28,6 +29,7 @@ const sumWithDots: Template = r => {
     hint: "Count the blue dots, then keep counting the orange ones.",
     explanation: `${a} blue dots, then count on ${b}: ${Array.from({ length: b }, (_, i) => a + i + 1).join(", ")}. So ${a} + ${b} = ${a + b}.`,
     reason: `${a} + ${b} = ${a + b}.`,
+    working: arith(add({ dots: 0 }, { dots: 1 })),
   };
 };
 
@@ -41,6 +43,7 @@ const countOn: Template = r => {
     hint: `Say ${a}, then count on ${b}.`,
     explanation: `Start at ${a} and count on ${b}: ${Array.from({ length: b }, (_, i) => a + i + 1).join(", ")}. So ${a} + ${b} = ${a + b}.`,
     reason: `${b} more than ${a} is ${a + b}.`,
+    working: arith(add(a, b)),
   };
 };
 
@@ -55,6 +58,7 @@ const story: Template = r => {
     hint: `Hold up ${a} fingers, then ${b} more.`,
     explanation: `${a} and ${b} more: count on from ${a}: ${Array.from({ length: b }, (_, i) => a + i + 1).join(", ")}. ${name} has ${a + b}.`,
     reason: `${a} + ${b} = ${a + b}.`,
+    working: arith(add(a, b)),
   };
 };
 
@@ -68,13 +72,15 @@ const frogHops: Template = r => {
     hint: "Count each hop out loud.",
     explanation: `From ${a}, hop ${b} times: ${Array.from({ length: b }, (_, i) => a + i + 1).join(", ")}. It lands on ${a + b}.`,
     reason: `${a} and ${b} hops make ${a + b}.`,
+    working: arith(add(a, b)),
   };
 };
 
 const threeAddends: Template = r => {
   const thing = pick(r, THINGS);
   const a = int(r, 1, 4), b = int(r, 1, 4), c = int(r, 1, Math.max(1, 10 - a - b));
-  if (a + b + c > 10) return threeAddends(r);
+  // Two 1s make it a counting-on question, too easy for L3.
+  if (a + b + c > 10 || [a, b, c].filter(n => n === 1).length > 1) return threeAddends(r);
   return {
     subSkill: "add-three", format: "audio",
     prompt: `${a} ${thing}, then ${b} more, then ${c} more. How many ${thing}?`,
@@ -83,6 +89,7 @@ const threeAddends: Template = r => {
     hint: "Add the first two, then add the last one.",
     explanation: `${a} + ${b} = ${a + b}. Then ${a + b} + ${c} = ${a + b + c}.`,
     reason: `${a}, ${b} and ${c} make ${a + b + c}.`,
+    working: arith(add(a, b, c)),
   };
 };
 
@@ -97,6 +104,7 @@ const hiddenDots: Template = r => {
     hint: `Count on from ${shown} until you reach ${total}.`,
     explanation: `From ${shown}, count on to ${total}: ${Array.from({ length: hidden }, (_, i) => shown + i + 1).join(", ")}. That is ${hidden} more, so ${hidden} are hiding.`,
     reason: `${shown} and ${hidden} make ${total}.`,
+    working: { kind: "missing", lhs: add({ dots: 0 }, "x"), rhs: total },
   };
 };
 
@@ -113,6 +121,7 @@ const compareSums: Template = r => {
     hint: "Work out each one, then compare.",
     explanation: `${left} = ${a + b} and ${right} = ${c + d}. ${Math.max(a + b, c + d)} is more.`,
     reason: `${ans} makes ${Math.max(a + b, c + d)}.`,
+    working: { kind: "extreme", of: "max", items: [{ label: left, expr: add(a, b) }, { label: right, expr: add(c, d) }] },
   };
 };
 
@@ -130,11 +139,16 @@ const makeTen: Template = r => {
     hint: "Use all 10 fingers. Fold down the first number.",
     explanation: `${good} = 10, ${near} = 9, ${over} = 11. Only ${good} makes 10.`,
     reason: `${x} and ${10 - x} make 10.`,
+    working: {
+      kind: "equals", target: 10,
+      items: [{ label: good, expr: add(x, 10 - x) }, { label: near, expr: add(y, 9 - y) }, { label: over, expr: add(z, 11 - z) }],
+    },
   };
 };
 
 const whoAmI: Template = r => {
-  const b = int(r, 1, 4), t = int(r, b + 2, 10), n = t - b;
+  // b starts at 2: "add 1 to me" is just the number before, too easy for L4.
+  const b = int(r, 2, 4), t = int(r, b + 2, 10), n = t - b;
   return {
     subSkill: "missing-addend", format: "audio",
     prompt: `I am a number. Add ${b} to me and you get ${t}. Who am I?`,
@@ -143,6 +157,7 @@ const whoAmI: Template = r => {
     hint: `Count back ${b} from ${t}.`,
     explanation: `Count back ${b} from ${t}: ${Array.from({ length: b }, (_, i) => t - i - 1).join(", ")}. So I am ${n}, and ${n} + ${b} = ${t}.`,
     reason: `${n} + ${b} = ${t}.`,
+    working: { kind: "missing", lhs: add("x", b), rhs: t },
   };
 };
 
@@ -156,6 +171,7 @@ const balance: Template = r => {
     hint: "Count the left pan first.",
     explanation: `Left: ${a} + ${b} = ${total}. Right has ${c}, and ${c} + ${bag} = ${total}. So the bag holds ${bag}.`,
     reason: `${c} and ${bag} make ${total}, the same as the left pan.`,
+    working: { kind: "missing", lhs: add(c, "x"), rhs: add(a, b) },
   };
 };
 
@@ -176,6 +192,7 @@ const pickBags: Template = r => {
     hint: "Try the biggest bag first. What goes with it?",
     explanation: pairs.map(p => `${p[0]} + ${p[1]} = ${p[0] + p[1]}`).join(", ") + `. So ${ans} make ${t}.`,
     reason: `${ans} make ${t}.`,
+    working: { kind: "equals", target: t, items: pairs.map(p => ({ label: fmt(p), expr: add(p[0], p[1]) })) },
   };
 };
 

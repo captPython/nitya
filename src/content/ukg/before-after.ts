@@ -1,5 +1,5 @@
 import type { TopicContent } from "../../types";
-import { buildBank, int, numOptions, type Template } from "../gen";
+import { add, arith, buildBank, int, numOptions, sub, type Template } from "../gen";
 
 const ID = "ukg-before-after";
 
@@ -13,6 +13,7 @@ const after = (lo: number, hi: number): Template => r => {
     hint: `Say ${n}, then count one more.`,
     explanation: `Just after means one more. One more than ${n} is ${n + 1}.`,
     reason: `${n + 1} is one more than ${n}.`,
+    working: arith(add(n, 1)),
   };
 };
 
@@ -26,6 +27,7 @@ const before = (lo: number, hi: number): Template => r => {
     hint: `Count back one step from ${n}.`,
     explanation: `Just before means one less. One less than ${n} is ${n - 1}.`,
     reason: `${n - 1} is one less than ${n}.`,
+    working: arith(sub(n, 1)),
   };
 };
 
@@ -39,6 +41,7 @@ const between = (lo: number, hi: number): Template => r => {
     hint: `Count from ${a}: which number do you say next?`,
     explanation: `${a}, ${a + 1}, ${a + 2}. The number in the middle is ${a + 1}.`,
     reason: `${a + 1} sits between ${a} and ${a + 2}.`,
+    working: { kind: "between", above: a, below: a + 2 },
   };
 };
 
@@ -57,11 +60,13 @@ const twoSteps: Template = r => {
       ? `From ${n}, count on ${k}: ${Array.from({ length: k }, (_, i) => n + i + 1).join(", ")}. You land on ${ans}.`
       : `From ${n}, count back ${k}: ${Array.from({ length: k }, (_, i) => n - i - 1).join(", ")}. You land on ${ans}.`,
     reason: `${k} steps ${forward ? "forward" : "back"} from ${n} is ${ans}.`,
+    working: arith(forward ? add(n, k) : sub(n, k)),
   };
 };
 
 const riddle: Template = r => {
-  const a = int(r, 10, 47);
+  // Past 20, so the riddle stays harder than L2's "between" questions.
+  const a = int(r, 20, 47);
   return {
     subSkill: "two-steps", format: "audio",
     prompt: `I come just after ${a} and just before ${a + 2}. Who am I?`,
@@ -70,6 +75,7 @@ const riddle: Template = r => {
     hint: "Both clues point to the same number.",
     explanation: `Just after ${a} is ${a + 1}. Just before ${a + 2} is also ${a + 1}.`,
     reason: `${a + 1} fits both clues.`,
+    working: { kind: "between", above: a, below: a + 2 },
   };
 };
 

@@ -1,4 +1,4 @@
-import type { Level, Question, QuestionFormat, Visual } from "../types";
+import type { Expr, Level, Question, QuestionFormat, Visual, Working } from "../types";
 
 export type Rng = () => number;
 
@@ -40,6 +40,11 @@ export function numOptions(r: Rng, answer: number, lo: number, hi: number, sprea
 
 export const dots = (...groups: Visual["groups"]): Visual => ({ kind: "dots", groups });
 
+/** Working helpers: add(3, 4) is 3 + 4, sub(9, 2, 3) is 9 − 2 − 3. */
+export const add = (...args: Expr[]): Expr => ({ op: "+", args });
+export const sub = (...args: Expr[]): Expr => ({ op: "-", args });
+export const arith = (expr: Expr): Working => ({ kind: "arith", expr });
+
 /** What a template returns; the bank builder adds id, topic and level. */
 export interface Draft {
   subSkill: string;
@@ -51,6 +56,7 @@ export interface Draft {
   hint: string;
   explanation: string;
   reason: string;
+  working: Working;
 }
 
 export type Template = (r: Rng) => Draft;

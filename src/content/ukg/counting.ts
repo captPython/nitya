@@ -15,6 +15,7 @@ const countDots = (lo: number, hi: number): Template => r => {
     hint: n > 10 ? "Count the full rows of 10 first, then count on." : "Touch each dot once as you count.",
     explanation: `${rows}Counting every dot gives ${n}.`,
     reason: `There are ${n} dots.`,
+    working: { kind: "count-dots" },
   };
 };
 
@@ -28,6 +29,7 @@ const whatsNext = (lo: number, hi: number): Template => r => {
     hint: "Say the numbers out loud and keep going.",
     explanation: `${a}, ${a + 1}, ${a + 2}, then ${a + 3}. Each number is one more.`,
     reason: `${a + 3} comes right after ${a + 2}.`,
+    working: { kind: "sequence", terms: [a, a + 1, a + 2, null] },
   };
 };
 
@@ -41,6 +43,7 @@ const countBack: Template = r => {
     hint: "Each number is one less.",
     explanation: `${a + 3}, ${a + 2}, ${a + 1}, then ${a}. Counting back takes one away each time.`,
     reason: `${a} is one less than ${a + 1}.`,
+    working: { kind: "sequence", terms: [a + 3, a + 2, a + 1, null] },
   };
 };
 
@@ -54,6 +57,7 @@ const numberName: Template = r => {
     hint: "Count on your fingers to that word.",
     explanation: `"${NUMBER_NAMES[n - 1]}" is written ${n}.`,
     reason: `${n} is ${NUMBER_NAMES[n - 1]}.`,
+    working: { kind: "number-word", word: NUMBER_NAMES[n - 1] },
   };
 };
 
@@ -67,6 +71,7 @@ const fillGap: Template = r => {
     hint: `Count on from ${a + 1}.`,
     explanation: `After ${a + 1} comes ${a + 2}, and then ${a + 3}.`,
     reason: `${a + 2} sits between ${a + 1} and ${a + 3}.`,
+    working: { kind: "sequence", terms: [a, a + 1, null, a + 3] },
   };
 };
 
@@ -84,6 +89,7 @@ const skipCount: Template = r => {
     hint: `How much bigger is each number than the one before?`,
     explanation: `Each number goes up by ${step}. ${c} and ${step} more is ${d}.`,
     reason: `Counting by ${step}s: ${c}, then ${d}.`,
+    working: { kind: "sequence", terms: [a, b, c, null] },
   };
 };
 

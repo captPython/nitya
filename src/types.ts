@@ -25,6 +25,36 @@ export interface Visual {
   groups: DotGroup[];
 }
 
+/**
+ * A number in a question's working: a literal, the unknown `x`, the dots in
+ * one picture group (`dots` is the group's index), or a sum or difference.
+ */
+export type Expr = number | "x" | { dots: number } | { op: "+" | "-"; args: Expr[] };
+
+/**
+ * How a question's answer is worked out, written so the validation engine can
+ * recompute it on its own instead of trusting the generator.
+ */
+export type Working =
+  /** The answer is the value of `expr`. */
+  | { kind: "arith"; expr: Expr }
+  /** The answer is the number of dots in the picture that are not crossed out. */
+  | { kind: "count-dots" }
+  /** The answer is the `x` that makes `lhs` equal `rhs`. */
+  | { kind: "missing"; lhs: Expr; rhs: Expr }
+  /** The answer is the blank (null) in a sequence that goes up or down by a fixed step. */
+  | { kind: "sequence"; terms: (number | null)[] }
+  /** The answer is a number bigger than `above` and smaller than `below`. */
+  | { kind: "between"; above: number; below: number }
+  /** The answer is the label whose value is biggest (or smallest), or `tieLabel` when they are equal. */
+  | { kind: "extreme"; of: "max" | "min"; items: { label: string; expr: Expr }[]; tieLabel?: string }
+  /** The answer is the label whose value equals `target`. */
+  | { kind: "equals"; target: number; items: { label: string; expr: Expr }[] }
+  /** The answer is `values` sorted, written "a, b, c". */
+  | { kind: "order"; values: number[]; direction: "asc" | "desc" }
+  /** The answer is the number that `word` names, like "seven". */
+  | { kind: "number-word"; word: string };
+
 export interface Question {
   id: string;
   topicId: string;
@@ -41,6 +71,8 @@ export interface Question {
   explanation: string;
   /** One-line reason shown with the praise after a right answer. */
   reason: string;
+  /** How the answer is worked out. Imported questions may not have one. */
+  working?: Working;
 }
 
 export interface Topic {
