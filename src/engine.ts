@@ -117,6 +117,13 @@ export function nextQuestion(
     if (pool.length) break;
   }
 
+  // Keep questions with the same maths, like 3 + 4 and 4 + 3, out of one quiz.
+  // Only if a level has nothing else left does it repeat the maths, rather than
+  // move the child to a level they haven't reached.
+  const usedGroups = new Set(bank.filter(q => q.variantGroup && s.asked.includes(q.id)).map(q => q.variantGroup));
+  const otherMaths = pool.filter(q => !q.variantGroup || !usedGroups.has(q.variantGroup));
+  if (otherMaths.length) pool = otherMaths;
+
   const fresh = pool.filter(q => !s.seenBefore.includes(q.id));
   if (fresh.length) {
     pool = fresh;

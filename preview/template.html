@@ -111,6 +111,7 @@ p { margin: 0; }
 .stat { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
 .tools { display: grid; gap: 8px; padding-top: 10px; border-top: 2px dashed var(--line); }
 .tools .ghost { min-height: 40px; font-size: 0.9rem; }
+.bankrow { display: grid; gap: 6px; }
 
 /* Dashboard */
 .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
@@ -210,6 +211,56 @@ function load() {
 }
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch (e) {} }
 let db = load();
+
+/* ---------- question bank (this browser only) ---------- */
+// New questions saves only its seed: replaying the seeds in order makes the same questions again.
+const BANK_KEY = "nitya-ukg-bank-v1";
+const BUILT_IN = new Map(TOPICS.map(t => [t.topic.id, [...t.bank]]));
+let bankStore = null, bankNote = null, bankBusy = false;
+function loadSeeds() {
+  try { const s = JSON.parse(localStorage.getItem(BANK_KEY) || "{}"); return s && typeof s === "object" ? s : {}; } catch (e) { return {}; }
+}
+function saveSeeds(seeds) { try { localStorage.setItem(BANK_KEY, JSON.stringify(seeds)); } catch (e) {} }
+async function addFromSeed(topicId, seed) {
+  const content = byId(topicId);
+  const summary = await M.addNewQuestions(bankStore, content, { seed });
+  content.bank.push(...summary.approved.map(id => bankStore.rows.get(id).question));
+  return summary;
+}
+async function initBank() {
+  for (const t of TOPICS) t.bank = [...BUILT_IN.get(t.topic.id)];
+  bankStore = new M.MemoryQuestionStore(TOPICS.map(M.topicInfo));
+  await M.seedBank(bankStore, TOPICS);
+  for (const [topicId, seeds] of Object.entries(loadSeeds())) {
+    if (byId(topicId)) for (const seed of seeds) await addFromSeed(topicId, seed);
+  }
+}
+function describeAdded(content, summary) {
+  const perLevel = summary.asked / 4;
+  const byLevel = [1, 2, 3, 4].map(l => summary.approved.filter(id => bankStore.rows.get(id).question.level === l).length);
+  const short = [1, 2, 3, 4].filter(l => byLevel[l - 1] < perLevel)
+    .map(l => byLevel[l - 1] ? `${LEVEL_NAMES[l]} had only ${byLevel[l - 1]} new ones left` : `${LEVEL_NAMES[l]} has no new ones left`);
+  const held = summary.inReview.length ? ` ${summary.inReview.length} failed a check and wait for the admin.` : "";
+  return `${content.topic.title}: added ${summary.approved.length} new questions.${short.length ? ` ${short.join("; ")}.` : ""}${held}`;
+}
+async function newQuestions(topicId) {
+  if (bankBusy || !bankStore) return;
+  bankBusy = true;
+  try {
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+    const summary = await addFromSeed(topicId, seed);
+    if (summary.approved.length) {
+      const seeds = loadSeeds();
+      (seeds[topicId] || (seeds[topicId] = [])).push(seed);
+      saveSeeds(seeds);
+    }
+    bankNote = describeAdded(byId(topicId), summary);
+  } catch (e) {
+    bankNote = "Couldn't make new questions: " + e.message;
+  }
+  bankBusy = false;
+  render();
+}
 
 function noteAnswer(q, right) {
   const k = q.topicId + "|" + q.subSkill;
@@ -570,11 +621,21 @@ function renderSide() {
     stage.classList.toggle("solo", app.mode !== "dash");
     side.hidden = app.mode !== "dash";
     side.innerHTML = `<span class="label">Tester tools (preview only)</span>
-      <p class="small muted">Progress is saved in this browser. Reset it to see a brand-new UKG class.</p>
-      <div class="tools"><button class="ghost" type="button" id="reset">Reset all progress</button></div>`;
+      <p class="small muted">Progress and added questions are saved in this browser. Reset to see a brand-new UKG class.</p>
+      <div class="tools"><button class="ghost" type="button" id="reset">Reset all progress</button></div>
+      <div class="tools"><span class="label">Question bank</span>
+        <p class="small muted">New questions makes fresh questions from the topic's templates, checks every one, and adds the ones that pass. Quizzes start using them straight away.</p>
+        ${TOPICS.map(t => `<div class="bankrow"><span class="small"><b>${esc(t.topic.title)}</b> · <span class="muted">${t.bank.length} questions</span></span>
+          <button class="ghost" type="button" data-newq="${t.topic.id}" ${bankStore && !bankBusy ? "" : "disabled"}>New questions</button></div>`).join("")}
+        ${bankNote ? `<p class="small" role="status">${esc(bankNote)}</p>` : ""}</div>`;
+    side.querySelectorAll("[data-newq]").forEach(b => b.onclick = () => newQuestions(b.dataset.newq));
     const reset = document.getElementById("reset");
-    if (reset) reset.onclick = () => {
-      if (reset.dataset.sure) { db = freshSave(); save(); goDash(); }
+    if (reset) reset.onclick = async () => {
+      if (reset.dataset.sure) {
+        db = freshSave(); save(); saveSeeds({}); bankNote = null; bankStore = null;
+        goDash();
+        await initBank(); render();
+      }
       else { reset.dataset.sure = "1"; reset.textContent = "Tap again to reset"; }
     };
     return;
@@ -617,4 +678,5 @@ function render() {
 let lastView = "";
 
 render();
+initBank().then(render, e => { bankNote = "Couldn't load the question bank: " + e.message; render(); });
 </script>

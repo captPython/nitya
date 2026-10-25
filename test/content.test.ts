@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { UKG_TOPICS } from "../src/content/ukg";
+import { contentKey } from "../src/content/gen";
 
 describe.each(UKG_TOPICS.map(t => [t.topic.title, t] as const))("%s", (_title, content) => {
   const { bank, topic, tryIt, subSkillNames } = content;
 
-  it("has 20 unique questions at every level (80 in all)", () => {
+  it("has 20 questions at every level (80 in all), none repeated anywhere in the topic", () => {
     expect(bank).toHaveLength(80);
     expect(new Set(bank.map(q => q.id)).size).toBe(80);
-    for (const l of [1, 2, 3, 4]) {
-      const level = bank.filter(q => q.level === l);
-      expect(level).toHaveLength(20);
-      expect(new Set(level.map(q => q.prompt + JSON.stringify(q.visual ?? null))).size).toBe(20);
-    }
+    // The database allows one copy of a question per topic, whatever its level.
+    expect(new Set(bank.map(contentKey)).size).toBe(80);
+    for (const l of [1, 2, 3, 4]) expect(bank.filter(q => q.level === l)).toHaveLength(20);
   });
 
   it("every question has distinct options that include each right answer", () => {

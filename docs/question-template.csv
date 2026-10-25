@@ -1,0 +1,6 @@
+id,topic_id,level,sub_skill,format,prompt,options,answers,hint,explanation,reason,picture,working
+sample-add-1,ukg-addition-10,2,count-on,tap-picture,What is 4 + 3?,6 | 7 | 8,7,"Say 4, then count on 3.","Start at 4 and count on 3: 5, 6, 7. So 4 + 3 = 7.",3 more than 4 is 7.,,4 + 3
+sample-sub-1,ukg-subtraction-10,1,take-away-objects,tap-picture,"5 dots, 2 crossed out. How many are left?",2 | 3 | 4,3,Count the dots that are not crossed out.,"5 take away 2 leaves 3. So 5 − 2 = 3.",3 dots are left.,5 blue 2 crossed,5 - 2
+sample-count-1,ukg-counting-50,1,count-objects,count,How many dots are there?,6 | 7 | 8,7,Touch each dot once as you count.,"Count 4 blue and 3 orange: 1, 2, 3, 4, 5, 6, 7. There are 7 dots.",There are 7 dots.,"4 blue, 3 orange",count dots
+sample-between-1,ukg-comparing,3,in-between,mcq,Which number is bigger than 12 but smaller than 14?,11 | 13 | 15,13,Count on from 12 and stop before 14.,"After 12 comes 13, and then 14. So 13 is the number in between.",13 sits between 12 and 14.,,"{""kind"":""between"",""above"":12,""below"":14}"
+,ukg-before-after,1,after,fill-blank,Which number comes right after 18?,17 | 19 | 20,19,Count on one from 18.,"Counting on from 18: 19. So 19 comes just after 18.",19 is one more than 18.,,18 + 1

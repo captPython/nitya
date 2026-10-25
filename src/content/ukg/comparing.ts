@@ -1,4 +1,4 @@
-import type { TopicContent } from "../../types";
+import type { Level, TopicContent } from "../../types";
 import { buildBank, dots, int, pick, shuffle, type Template } from "../gen";
 
 const ID = "ukg-comparing";
@@ -107,6 +107,14 @@ const order: Template = r => {
   };
 };
 
+const SEED = 303;
+const TEMPLATES: Record<Level, Template[]> = {
+  1: [moreGroups(8, 2, false)],
+  2: [biggerOfTwo, moreGroups(10, 0, true)],
+  3: [biggestOfThree],
+  4: [inRange, order],
+};
+
 export const COMPARING: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 3, title: "Comparing numbers" },
   lesson: [
@@ -117,12 +125,8 @@ export const COMPARING: TopicContent = {
   ],
   tryIt: { prompt: "Which is bigger: 14 or 41?", options: ["14", "41"], answer: "41",
     praise: "Yes! 41 has 4 tens. 14 has only 1 ten.", help: "Look at the tens: 41 has 4 tens, 14 has 1 ten." },
-  bank: buildBank(ID, 303, {
-    1: [moreGroups(8, 2, false)],
-    2: [biggerOfTwo, moreGroups(10, 0, true)],
-    3: [biggestOfThree],
-    4: [inRange, order],
-  }),
+  generator: { seed: SEED, templates: TEMPLATES },
+  bank: buildBank(ID, SEED, TEMPLATES),
   subSkillNames: {
     "compare-groups": "More and fewer", "compare-numbers": "Bigger and smaller", "biggest-smallest": "Biggest and smallest",
     "in-between": "Numbers in between", ordering: "Putting numbers in order",

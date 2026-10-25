@@ -1,3 +1,5 @@
+import type { Template } from "./content/gen";
+
 export type ClassId =
   | "LKG" | "UKG"
   | "C1" | "C2" | "C3" | "C4" | "C5" | "C6"
@@ -9,9 +11,12 @@ export const CLASS_ORDER: ClassId[] = [
 
 export type Level = 1 | 2 | 3 | 4;
 
-export type QuestionFormat =
-  | "tap-picture" | "match" | "drag-drop" | "count" | "audio" | "pattern" | "balance"
-  | "number-line" | "mcq" | "fill-blank" | "true-false" | "numeric" | "multi-step";
+export const QUESTION_FORMATS = [
+  "tap-picture", "match", "drag-drop", "count", "audio", "pattern", "balance",
+  "number-line", "mcq", "fill-blank", "true-false", "numeric", "multi-step",
+] as const;
+
+export type QuestionFormat = (typeof QUESTION_FORMATS)[number];
 
 /** Dots drawn above the question. `crossed` dots are shown taken away. */
 export interface DotGroup {
@@ -73,6 +78,8 @@ export interface Question {
   reason: string;
   /** How the answer is worked out. Imported questions may not have one. */
   working?: Working;
+  /** Questions with the same maths (like "3 + 4" and "4 + 3") share a group and never meet in one quiz. */
+  variantGroup?: string;
 }
 
 export interface Topic {
@@ -137,6 +144,8 @@ export interface TopicContent {
   topic: Topic;
   lesson: LessonScreen[];
   tryIt: TryIt;
+  /** The templates behind the bank. A new seed makes new questions from them. */
+  generator: { seed: number; templates: Record<Level, Template[]> };
   bank: Question[];
   /** Friendly names for sub-skills, shown in improvement areas. */
   subSkillNames: Record<string, string>;

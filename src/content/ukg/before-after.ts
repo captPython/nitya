@@ -1,4 +1,4 @@
-import type { TopicContent } from "../../types";
+import type { Level, TopicContent } from "../../types";
 import { add, arith, buildBank, int, numOptions, sub, type Template } from "../gen";
 
 const ID = "ukg-before-after";
@@ -79,6 +79,14 @@ const riddle: Template = r => {
   };
 };
 
+const SEED = 202;
+const TEMPLATES: Record<Level, Template[]> = {
+  1: [after(1, 10), before(2, 10), between(1, 8)],
+  2: [after(10, 19), before(11, 20), between(9, 18)],
+  3: [after(20, 49), before(21, 50), between(19, 47)],
+  4: [twoSteps, riddle],
+};
+
 export const BEFORE_AFTER: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 2, title: "Before, after and between" },
   lesson: [
@@ -89,11 +97,7 @@ export const BEFORE_AFTER: TopicContent = {
   ],
   tryIt: { prompt: "What comes just after 9?", options: ["8", "10", "11"], answer: "10",
     praise: "Yes! One more than 9 is 10.", help: "Say 9, then count one more: 10." },
-  bank: buildBank(ID, 202, {
-    1: [after(1, 10), before(2, 10), between(1, 8)],
-    2: [after(10, 19), before(11, 20), between(9, 18)],
-    3: [after(20, 49), before(21, 50), between(19, 47)],
-    4: [twoSteps, riddle],
-  }),
+  generator: { seed: SEED, templates: TEMPLATES },
+  bank: buildBank(ID, SEED, TEMPLATES),
   subSkillNames: { after: "Number after", before: "Number before", between: "Number between", "two-steps": "Steps on the number line" },
 };

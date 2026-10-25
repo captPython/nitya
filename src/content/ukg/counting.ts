@@ -1,4 +1,4 @@
-import type { TopicContent } from "../../types";
+import type { Level, TopicContent } from "../../types";
 import { buildBank, dots, int, numOptions, pick, type Template } from "../gen";
 
 const ID = "ukg-counting-50";
@@ -93,6 +93,14 @@ const skipCount: Template = r => {
   };
 };
 
+const SEED = 101;
+const TEMPLATES: Record<Level, Template[]> = {
+  1: [countDots(1, 10), whatsNext(1, 8), numberName],
+  2: [countDots(11, 20), whatsNext(9, 18), countBack],
+  3: [fillGap, countDots(21, 30)],
+  4: [skipCount],
+};
+
 export const COUNTING: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 1, title: "Counting 1 to 50" },
   lesson: [
@@ -103,12 +111,8 @@ export const COUNTING: TopicContent = {
   ],
   tryIt: { prompt: "How many dots?", visual: dots({ count: 7, color: "blue" }), options: ["6", "7", "8"], answer: "7",
     praise: "You counted all 7 dots!", help: "Touch each dot once: 1, 2, 3, 4, 5, 6, 7." },
-  bank: buildBank(ID, 101, {
-    1: [countDots(1, 10), whatsNext(1, 8), numberName],
-    2: [countDots(11, 20), whatsNext(9, 18), countBack],
-    3: [fillGap, countDots(21, 30)],
-    4: [skipCount],
-  }),
+  generator: { seed: SEED, templates: TEMPLATES },
+  bank: buildBank(ID, SEED, TEMPLATES),
   subSkillNames: {
     "count-objects": "Counting things", "count-on": "Counting on", "count-back": "Counting back",
     "number-names": "Number words", "skip-count": "Counting in 2s, 5s and 10s",
