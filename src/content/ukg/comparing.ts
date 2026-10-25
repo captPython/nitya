@@ -22,6 +22,11 @@ const moreGroups = (maxN: number, minGap: number, allowSame: boolean): Template 
       ? `Blue has ${a} and orange has ${b}. They are the same.`
       : `Blue has ${a} and orange has ${b}. ${Math.max(a, b)} is more than ${Math.min(a, b)}, so ${answer.toLowerCase()} has ${word}.`,
     reason: a === b ? `Both have ${a}.` : `${answer} has ${fewer ? Math.min(a, b) : Math.max(a, b)}.`,
+    working: {
+      kind: "extreme", of: fewer ? "min" : "max",
+      items: [{ label: "Blue", expr: { dots: 0 } }, { label: "Orange", expr: { dots: 1 } }],
+      ...(allowSame ? { tieLabel: "Same" } : {}),
+    },
   };
 };
 
@@ -39,6 +44,7 @@ const biggerOfTwo: Template = r => {
     hint: "When you count, bigger numbers come later.",
     explanation: `Counting up, ${Math.min(a, b)} comes before ${Math.max(a, b)}. So ${ans} is ${smaller ? "smaller" : "bigger"}.`,
     reason: `${ans} is ${smaller ? "smaller" : "bigger"}.`,
+    working: { kind: "extreme", of: smaller ? "min" : "max", items: [a, b].map(v => ({ label: String(v), expr: v })) },
   };
 };
 
@@ -64,6 +70,7 @@ const biggestOfThree: Template = r => {
     hint: "Look at the tens first. If they match, look at the ones.",
     explanation: `In counting order they go ${[...nums].sort((x, y) => x - y).join(", ")}. The ${smallest ? "smallest" : "biggest"} is ${ans}.`,
     reason: `${ans} is the ${smallest ? "smallest" : "biggest"}.`,
+    working: { kind: "extreme", of: smallest ? "min" : "max", items: nums.map(v => ({ label: String(v), expr: v })) },
   };
 };
 
@@ -78,6 +85,7 @@ const inRange: Template = r => {
     hint: `List the numbers after ${a}, stopping before ${a + 3}.`,
     explanation: `Bigger than ${a} and smaller than ${a + 3} means ${a + 1} or ${a + 2}. ${a + 3} is not smaller than itself.`,
     reason: `${valid} is between ${a} and ${a + 3}.`,
+    working: { kind: "between", above: a, below: a + 3 },
   };
 };
 
@@ -95,6 +103,7 @@ const order: Template = r => {
     hint: "Find the smallest one first, then the next.",
     explanation: `${asc[0]} is the smallest, then ${asc[1]}, then ${asc[2]}.`,
     reason: `${fmt(asc)} goes from smallest to biggest.`,
+    working: { kind: "order", values: nums, direction: "asc" },
   };
 };
 

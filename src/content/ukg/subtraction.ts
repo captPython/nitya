@@ -1,5 +1,5 @@
 import type { TopicContent } from "../../types";
-import { buildBank, dots, int, NAMES, numOptions, pick, shuffle, THINGS, type Template } from "../gen";
+import { arith, buildBank, dots, int, NAMES, numOptions, pick, shuffle, sub, THINGS, type Template } from "../gen";
 
 const ID = "ukg-subtraction-10";
 
@@ -14,6 +14,7 @@ const flyAway: Template = r => {
     hint: "Count only the dots that are not crossed out.",
     explanation: `${b} of the ${a} are crossed out. Count the rest: ${a - b}. So ${a} − ${b} = ${a - b}.`,
     reason: `${a} take away ${b} leaves ${a - b}.`,
+    working: { kind: "count-dots" },
   };
 };
 
@@ -28,6 +29,7 @@ const minusWithDots: Template = r => {
     hint: "Cover the crossed-out dots and count what is left.",
     explanation: `Start with ${a}. Take away ${b}. ${a - b} are left.`,
     reason: `${a} − ${b} = ${a - b}.`,
+    working: { kind: "count-dots" },
   };
 };
 
@@ -41,6 +43,7 @@ const countBack: Template = r => {
     hint: `Start at ${a} and count back ${b}.`,
     explanation: `From ${a}, count back ${b}: ${Array.from({ length: b }, (_, i) => a - i - 1).join(", ")}. So ${a} − ${b} = ${a - b}.`,
     reason: `${b} less than ${a} is ${a - b}.`,
+    working: arith(sub(a, b)),
   };
 };
 
@@ -55,6 +58,7 @@ const eatStory: Template = r => {
     hint: `Hold up ${a} fingers and fold down ${b}.`,
     explanation: `${a} take away ${b}: count back from ${a}: ${Array.from({ length: b }, (_, i) => a - i - 1).join(", ")}. ${a - b} are left.`,
     reason: `${a} − ${b} = ${a - b}.`,
+    working: arith(sub(a, b)),
   };
 };
 
@@ -68,6 +72,7 @@ const hopBack: Template = r => {
     hint: "Count each hop back out loud.",
     explanation: `From ${a}, hop back ${b}: ${Array.from({ length: b }, (_, i) => a - i - 1).join(", ")}. It lands on ${a - b}.`,
     reason: `${a} back ${b} is ${a - b}.`,
+    working: arith(sub(a, b)),
   };
 };
 
@@ -81,6 +86,7 @@ const howManyGone: Template = r => {
     hint: `Count on from ${left} up to ${a}.`,
     explanation: `From ${left}, count on to ${a}: ${Array.from({ length: gone }, (_, i) => left + i + 1).join(", ")}. That is ${gone}, so ${gone} flew away.`,
     reason: `${a} − ${gone} = ${left}.`,
+    working: { kind: "missing", lhs: sub(a, "x"), rhs: left },
   };
 };
 
@@ -95,6 +101,7 @@ const twoStep: Template = r => {
     hint: "Take away the first number, then the second.",
     explanation: `${a} − ${b} = ${a - b}. Then ${a - b} − ${c} = ${a - b - c}.`,
     reason: `${a} take away ${b} and ${c} leaves ${a - b - c}.`,
+    working: arith(sub(a, b, c)),
   };
 };
 
@@ -111,11 +118,13 @@ const leavesMore: Template = r => {
     hint: "Work out each one, then compare.",
     explanation: `${left} = ${a - b} and ${right} = ${c - d}. ${Math.max(a - b, c - d)} is more.`,
     reason: `${ans} leaves ${Math.max(a - b, c - d)}.`,
+    working: { kind: "extreme", of: "max", items: [{ label: left, expr: sub(a, b) }, { label: right, expr: sub(c, d) }] },
   };
 };
 
 const whoAmI: Template = r => {
-  const b = int(r, 1, 5), c = int(r, 1, 10 - b), n = b + c;
+  // b starts at 2: "take away 1 from me" is just the number after, too easy for L4.
+  const b = int(r, 2, 5), c = int(r, 1, 10 - b), n = b + c;
   return {
     subSkill: "missing-start", format: "audio",
     prompt: `I am a number. Take away ${b} from me and you get ${c}. Who am I?`,
@@ -124,6 +133,7 @@ const whoAmI: Template = r => {
     hint: `Count on ${b} from ${c}.`,
     explanation: `Put the ${b} back: ${c} + ${b} = ${n}. Check: ${n} − ${b} = ${c}.`,
     reason: `${n} − ${b} = ${c}.`,
+    working: { kind: "missing", lhs: sub("x", b), rhs: c },
   };
 };
 
@@ -139,11 +149,20 @@ const whichGives: Template = r => {
     hint: "Work out each one. Which gives the number asked for?",
     explanation: `${good} = ${t}, ${low} = ${t - 1}, ${high} = ${t + 1}. Only ${good} leaves ${t}.`,
     reason: `${good} = ${t}.`,
+    working: {
+      kind: "equals", target: t,
+      items: [
+        { label: good, expr: { op: "-", args: [t + sub, sub] } },
+        { label: low, expr: { op: "-", args: [t + sub - 1, sub] } },
+        { label: high, expr: { op: "-", args: [t + sub + 1, sub] } },
+      ],
+    },
   };
 };
 
 const marbles: Template = r => {
-  const name = pick(r, NAMES), gave = int(r, 1, 5), left = int(r, 1, 10 - gave);
+  // gave starts at 2: giving away 1 is just counting on by one, too easy for L4.
+  const name = pick(r, NAMES), gave = int(r, 2, 5), left = int(r, 1, 10 - gave);
   return {
     subSkill: "missing-start", format: "audio",
     prompt: `${name} gave away ${gave} marbles and has ${left} left. How many did ${name} have at the start?`,
@@ -152,6 +171,7 @@ const marbles: Template = r => {
     hint: "Put the marbles that were given away back.",
     explanation: `${left} left and ${gave} given away: ${left} + ${gave} = ${gave + left}.`,
     reason: `${gave + left} − ${gave} = ${left}.`,
+    working: { kind: "missing", lhs: sub("x", gave), rhs: left },
   };
 };
 
