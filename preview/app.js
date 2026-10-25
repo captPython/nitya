@@ -33,7 +33,7 @@ let saveError = null;
 let saving = Promise.resolve();
 let app = { mode: "loading" };
 let banks = {};       // topic id -> the approved questions its quizzes use
-let settings = { topics: [], child: [] };   // the admin's topic settings, and the parent's choices for this child
+let settings = { classes: [], child: null };   // the admin's class defaults, and the parent's choice for this child
 let newqBusy = null;  // the topic New questions is working on
 
 const classTopics = () => M.contentForClass(child.classId);
@@ -41,11 +41,10 @@ const topicList = () => classTopics().map(t => t.topic);
 const maxMarks = () => M.maxMarks(child.classId);
 const className = id => M.CLASS_NAMES[id];
 function refresh() { sum = M.summarize(child.classId, topicList(), data); }
-/** The pass mark and penalty this child's quizzes on a topic use. */
-function quizSettings(topicId) {
-  const t = settings.topics.find(x => x.topicId === topicId) ?? M.defaultTopicSettings(topicId);
-  return M.effectiveSettings(t, settings.child.find(x => x.topicId === topicId));
-}
+const classDefaults = (classes, classId) => classes.find(c => c.classId === classId) ?? M.defaultClassSettings(classId);
+/** The pass mark and penalty this child's quizzes use, on every topic. */
+function quizSettings() { return M.effectiveSettings(classDefaults(settings.classes, child.classId), settings.child); }
+const passPercent = () => settings.child?.passPercent ?? classDefaults(settings.classes, child.classId).passPercent;
 
 /** Saves in order without making the child wait. A failure shows a banner, and the next save tries again. */
 function persist(fn) {
@@ -79,11 +78,11 @@ async function openProfile(p) {
   child = p;
   try { storage.setItem(CURRENT_KEY, p.id); } catch (e) {}
   const ids = M.contentForClass(p.classId).map(c => c.topic.id);
-  const [d, topicSettings, childSettings, ...served] = await Promise.all([
-    backend.profileData(p.id), backend.topicSettings(), backend.childSettings(p.id), ...ids.map(id => backend.questions(id)),
+  const [d, classes, mine, ...served] = await Promise.all([
+    backend.profileData(p.id), backend.classSettings(), backend.childSettings(p.id), ...ids.map(id => backend.questions(id)),
   ]);
   data = d;
-  settings = { topics: topicSettings, child: childSettings };
+  settings = { classes, child: mine };
   // A bank that hasn't been loaded into the database yet falls back to the built-in questions.
   ids.forEach((id, i) => { banks[id] = served[i].length ? served[i] : byId(id).bank; });
   refresh();
@@ -480,7 +479,7 @@ function renderGrownups() {
       <button class="ghost" type="button" id="pin">Change the PIN</button>
       <button class="ghost" type="button" id="signout">Sign out</button></div>
     ${account.isAdmin
-      ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each topic's pass marks and the parents' limits, and set the level bands.</p>
+      ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each class's default pass mark and marks off, and set the level bands.</p>
           <div class="row"><button class="ghost" type="button" id="admin">Open the admin panel</button></div></div>`
       : DEMO ? `<div class="panel"><span class="label">Admin (demo)</span><p class="small muted">In the real app only Nitya's admin sees the admin panel. In the demo you can try it.</p>
           <div class="row"><button class="ghost" type="button" id="demoadmin">Make me the admin</button></div></div>` : ""}
@@ -526,71 +525,66 @@ function renderGrownups() {
 /* ---------- a child's quiz settings (grown-ups) ---------- */
 async function openChildSettings(profileId) {
   await step(async () => {
-    const [topics, mine] = await Promise.all([backend.topicSettings(), backend.childSettings(profileId)]);
-    show({ mode: "child-settings", profile: profiles.find(p => p.id === profileId), topics, mine });
+    const [classes, mine] = await Promise.all([backend.classSettings(), backend.childSettings(profileId)]);
+    show({ mode: "child-settings", profile: profiles.find(p => p.id === profileId), classes, mine });
   });
 }
 
-function stepper(kind, topicId, value, min, max, what) {
-  return `<span class="stepper">
-    <button class="ghost" type="button" data-${kind}="${topicId}" data-by="-1" ${value <= min ? "disabled" : ""} aria-label="Lower the ${what}">−</button>
-    <b aria-live="polite">${value}</b>
-    <button class="ghost" type="button" data-${kind}="${topicId}" data-by="1" ${value >= max ? "disabled" : ""} aria-label="Raise the ${what}">+</button></span>`;
-}
+const numberField = (id, label, value) =>
+  `<label><span>${label}</span><input type="number" inputmode="numeric" id="${id}" value="${value}"></label>`;
 
 function renderChildSettings() {
-  const p = app.profile;
-  const MAX = M.maxMarks(p.classId);
-  const rows = M.contentForClass(p.classId).map(c => {
-    const t = app.topics.find(x => x.topicId === c.topic.id) ?? M.defaultTopicSettings(c.topic.id);
-    const mine = app.mine.find(x => x.topicId === t.topicId);
-    const eff = M.effectiveSettings(t, mine);
-    const changed = mine && (mine.passMarks !== null || mine.wrongPenalty !== null);
-    return `<div class="setting">
-      <div class="row" style="justify-content:space-between"><h3>${esc(c.topic.title)}</h3>${changed ? `<span class="chip current">Changed</span>` : ""}</div>
-      <div class="setline"><span>Pass mark, out of ${MAX}</span>${t.passMarksMin < t.passMarksMax ? stepper("pass", t.topicId, eff.passMarks, t.passMarksMin, t.passMarksMax, "pass mark") : `<b>${eff.passMarks}</b>`}</div>
-      <div class="setline"><span>Marks off for a wrong first try</span>${t.wrongPenaltyMin < t.wrongPenaltyMax ? stepper("pen", t.topicId, eff.wrongPenalty, t.wrongPenaltyMin, t.wrongPenaltyMax, "penalty") : `<b>${eff.wrongPenalty}</b>`}</div>
-      <p class="small muted">Nitya's default is ${t.passMarks} and ${t.wrongPenalty}. You can choose a pass mark from ${t.passMarksMin} to ${t.passMarksMax}, and ${t.wrongPenaltyMin} to ${t.wrongPenaltyMax} marks off.</p>
-      ${changed ? `<div class="row"><button class="ghost" type="button" data-default="${t.topicId}">Use the default</button></div>` : ""}
-    </div>`;
-  }).join("");
+  const p = app.profile, name = esc(p.nickname), cls = esc(className(p.classId));
+  const def = classDefaults(app.classes, p.classId);
+  const eff = M.effectiveSettings(def, app.mine);
+  const lim = M.QUIZ_LIMITS, MAX = M.maxMarks(p.classId);
+  const percent = app.mine.passPercent ?? def.passPercent;
+  const changed = app.mine.passPercent !== null || app.mine.wrongPenalty !== null;
   screen.innerHTML = `<div class="narrow">
-    <span class="label">Grown-ups</span><h1>Quiz settings for ${esc(p.nickname)}</h1>
-    <p class="muted">Raise the pass mark or the marks off to push ${esc(p.nickname)} further. These change only ${esc(p.nickname)}'s quizzes, from the next one.</p>
-    ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
-    ${errorLine()}
-    <div class="settings">${rows}</div>
+    <span class="label">Grown-ups</span><h1>Quiz settings for ${name}</h1>
+    <p class="muted">These apply to every topic ${name} plays, from the next quiz. Choose what fits ${name}: higher to push further, lower to make it easier.</p>
+    <div class="setting">
+      <div class="row" style="justify-content:space-between"><h3>${name}'s quizzes</h3>${changed ? `<span class="chip current">Changed</span>` : ""}</div>
+      <div class="limits">
+        ${numberField("my-pass", "Pass mark, in %", percent)}
+        ${numberField("my-pen", "Marks off for a wrong first try", eff.wrongPenalty)}
+      </div>
+      <p class="small muted">${percent}% is ${eff.passMarks} of the ${MAX} marks a quiz can give. ${cls}'s default is ${def.passPercent}% to pass and ${def.wrongPenalty} ${def.wrongPenalty === 1 ? "mark" : "marks"} off for a wrong first try. A pass mark can be ${lim.passPercent.min}% to ${lim.passPercent.max}%, and marks off ${lim.wrongPenalty.min} to ${lim.wrongPenalty.max}.</p>
+      ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
+      ${errorLine()}
+      <div class="row"><button class="ghost" type="button" id="savemine">Save</button>
+        ${changed ? `<button class="ghost" type="button" id="usedefault">Use ${cls}'s default</button>` : ""}</div>
+    </div>
     <div class="row"><button class="btn primary" type="button" id="done">Back to Grown-ups</button></div>
   </div>`;
-  const change = (topicId, field, by) => {
-    const t = app.topics.find(x => x.topicId === topicId) ?? M.defaultTopicSettings(topicId);
-    const eff = M.effectiveSettings(t, app.mine.find(x => x.topicId === topicId));
-    saveMine(topicId, { [field]: eff[field] + by });
-  };
-  screen.querySelectorAll("[data-pass]").forEach(b => b.onclick = () => change(b.dataset.pass, "passMarks", Number(b.dataset.by)));
-  screen.querySelectorAll("[data-pen]").forEach(b => b.onclick = () => change(b.dataset.pen, "wrongPenalty", Number(b.dataset.by)));
-  screen.querySelectorAll("[data-default]").forEach(b => b.onclick = () => saveMine(b.dataset.default, { passMarks: null, wrongPenalty: null }));
+  document.getElementById("savemine").onclick = () => saveMine(def, {
+    passPercent: Number(document.getElementById("my-pass").value), wrongPenalty: Number(document.getElementById("my-pen").value),
+  });
+  const reset = document.getElementById("usedefault");
+  if (reset) reset.onclick = () => saveMine(def, { passPercent: null, wrongPenalty: null });
   document.getElementById("done").onclick = () => show({ mode: "grownups" });
 }
 
-function saveMine(topicId, change) {
-  const t = app.topics.find(x => x.topicId === topicId) ?? M.defaultTopicSettings(topicId);
-  const next = { topicId, passMarks: null, wrongPenalty: null, ...app.mine.find(x => x.topicId === topicId), ...change };
+function saveMine(def, choice) {
+  const next = { ...choice };
   // The default, chosen again, is kept as "the default", so it follows the admin's.
-  if (next.passMarks === t.passMarks) next.passMarks = null;
-  if (next.wrongPenalty === t.wrongPenalty) next.wrongPenalty = null;
+  if (next.passPercent === def.passPercent) next.passPercent = null;
+  if (next.wrongPenalty === def.wrongPenalty) next.wrongPenalty = null;
+  const problem = M.childSettingsProblem(next);
+  if (problem) { app.error = problem; app.note = null; render(); return; }
   const profileId = app.profile.id;
   step(async () => {
     await backend.saveChildSettings(profileId, next);
-    app.mine = [...app.mine.filter(x => x.topicId !== topicId), ...(next.passMarks !== null || next.wrongPenalty !== null ? [next] : [])];
-    if (child && child.id === profileId) settings.child = app.mine;
-    app.note = "Saved."; app.error = null;
+    app.mine = next;
+    if (child && child.id === profileId) settings.child = next;
+    app.note = next.passPercent === null && next.wrongPenalty === null ? `Saved. ${app.profile.nickname} uses the class default.` : "Saved.";
+    app.error = null;
     render();
   });
 }
 
 /* ---------- the admin panel ---------- */
-const ADMIN_TABS = [["queue", "Review queue"], ["topics", "Topic settings"], ["bands", "Level bands"], ["newq", "New questions"]];
+const ADMIN_TABS = [["queue", "Review queue"], ["classes", "Class settings"], ["bands", "Level bands"], ["newq", "New questions"]];
 const CHECK_NAMES = { answer: "Right answer", options: "Options", scope: "Syllabus scope", level: "Level tag", wording: "Wording and safety" };
 const sourceLabel = q => q.source === "csv" ? `CSV: ${q.sourceRef ?? "no row"}` : q.source === "website" ? `Website: ${q.sourceRef ?? ""}` : `Template${q.sourceRef ? `: ${q.sourceRef}` : ""}`;
 const topicTitle = id => byId(id)?.topic.title ?? id;
@@ -599,7 +593,7 @@ async function openAdmin(tab, extra = {}) {
   await step(async () => {
     const next = { mode: "admin", tab, ...extra };
     if (tab === "queue") next.queue = await backend.reviewQueue();
-    if (tab === "topics") next.topics = await backend.topicSettings();
+    if (tab === "classes") next.classes = await backend.classSettings();
     if (tab === "bands") next.cuts = M.cutsOf(await backend.levelBands());
     if (tab === "newq") {
       const [log, counts] = await Promise.all([
@@ -639,19 +633,15 @@ function renderAdmin() {
     body = app.queue.length
       ? `<p class="muted">${app.queue.length} ${app.queue.length === 1 ? "question failed" : "questions failed"} a check. Children never see a question until it is approved.</p>${app.queue.map(reviewCard).join("")}`
       : `<p class="muted">Nothing to review. Questions that fail a check wait here.</p>`;
-  } else if (app.tab === "topics") {
-    const field = (t, f, label) => `<label><span>${label}</span><input type="number" inputmode="numeric" data-topic="${t.topicId}" data-f="${f}" value="${t[f]}"></label>`;
-    // One group per setting: the default every child gets, then the range a parent can choose from in Quiz settings.
-    const group = (t, legend, f) => `<fieldset class="limits"><legend>${legend}</legend>
-      ${field(t, f, "Default for every child")}${field(t, `${f}Min`, "Lowest a parent can choose")}${field(t, `${f}Max`, "Highest a parent can choose")}</fieldset>`;
-    body = `<p class="muted">For each topic, the default every child gets, and the lowest and highest a parent can choose for their own child in Quiz settings.</p>
-      ${app.topics.filter(t => byId(t.topicId)).map(t => `<div class="setting">
-        <h3>${esc(topicTitle(t.topicId))} <small class="muted small">${esc(className(byId(t.topicId).topic.classId))}</small></h3>
-        ${group(t, `Pass mark, out of ${M.maxMarks(byId(t.topicId).topic.classId)}`, "passMarks")}
-        ${group(t, "Marks off for a wrong first try", "wrongPenalty")}
-        <p class="small muted">Saved now: every child needs ${t.passMarks}, and a parent can choose ${t.passMarksMin} to ${t.passMarksMax}. A wrong first try takes off ${t.wrongPenalty}, and a parent can choose ${t.wrongPenaltyMin} to ${t.wrongPenaltyMax}.</p>
-        ${app.topicMsg?.topicId === t.topicId ? `<p class="${app.topicMsg.error ? "error" : "note"}" role="status">${esc(app.topicMsg.text)}</p>` : ""}
-        <div class="row"><button class="ghost" type="button" data-save="${t.topicId}">Save</button></div></div>`).join("")}`;
+  } else if (app.tab === "classes") {
+    const cell = (c, f, label) => `<input type="number" inputmode="numeric" data-class="${c.classId}" data-f="${f}" value="${c[f]}" aria-label="${esc(className(c.classId))}: ${label}">`;
+    body = `<p class="muted">Each class's default pass mark, as a percentage of the 68 marks a quiz can give, and the marks off for a wrong first try. Every topic in the class uses them, for every child whose parent hasn't chosen their own in Quiz settings.</p>
+      <div class="classgrid">
+        <span class="label">Class</span><span class="label">Pass mark, %</span><span class="label">Marks off</span>
+        ${app.classes.map(c => `<b>${esc(className(c.classId))}</b>${cell(c, "passPercent", "pass mark in percent")}${cell(c, "wrongPenalty", "marks off")}`).join("")}
+      </div>
+      ${app.classMsg ? `<p class="${app.classMsg.error ? "error" : "note"}" role="status">${esc(app.classMsg.text)}</p>` : ""}
+      <div class="row"><button class="ghost" type="button" id="saveclasses">Save</button></div>`;
   } else if (app.tab === "bands") {
     const c = app.cuts;
     const pct = (f, label) => `<label>${label}<input type="number" inputmode="numeric" id="cut-${f}" value="${c[f]}"></label>`;
@@ -691,18 +681,21 @@ function renderAdmin() {
     const entry = app.queue.find(e => e.question.id === b.dataset.fixq);
     show({ mode: "fix", entry, edits: M.editsOf(entry.question), report: entry.report, candidate: null });
   });
-  screen.querySelectorAll("[data-save]").forEach(b => b.onclick = () => {
-    const t = { ...app.topics.find(x => x.topicId === b.dataset.save) };
-    screen.querySelectorAll(`[data-topic="${t.topicId}"]`).forEach(i => { t[i.dataset.f] = Number(i.value); });
-    // The message shows in the topic's own box, which may be far down the page.
-    const say = (text, error) => { app.topicMsg = { topicId: t.topicId, text, error }; app.note = null; render(); };
-    const problems = M.topicSettingsProblems(t, M.maxMarks(byId(t.topicId).topic.classId));
+  const saveClasses = document.getElementById("saveclasses");
+  if (saveClasses) saveClasses.onclick = () => {
+    // The message shows by the Save button, at the end of a long list.
+    const say = (text, error) => { app.classMsg = { text, error }; app.note = null; render(); };
+    const read = f => c => Number(screen.querySelector(`[data-class="${c.classId}"][data-f="${f}"]`).value);
+    const edited = app.classes.map(c => ({ ...c, passPercent: read("passPercent")(c), wrongPenalty: read("wrongPenalty")(c) }));
+    const changed = edited.filter((c, i) => c.passPercent !== app.classes[i].passPercent || c.wrongPenalty !== app.classes[i].wrongPenalty);
+    const problems = changed.flatMap(c => M.classSettingsProblems(c).map(p => `${className(c.classId)}: ${p}`));
     if (problems.length) return say(problems.join(" "), true);
+    if (!changed.length) return say("Nothing changed.", false);
     step(async () => {
-      try { await backend.saveTopicSettings(t); } catch (err) { return say(err.message, true); }
-      await openAdmin("topics", { topicMsg: { topicId: t.topicId, text: "Saved. Quizzes started from now use it." } });
+      try { for (const c of changed) await backend.saveClassSettings(c); } catch (err) { return say(err.message, true); }
+      await openAdmin("classes", { classMsg: { text: `Saved ${changed.map(c => className(c.classId)).join(", ")}. Quizzes started from now use it.` } });
     });
-  });
+  };
   const cut = f => Number(document.getElementById(`cut-${f}`).value);
   const readCuts = () => ({ l1: cut("l1"), l2: cut("l2"), l3: cut("l3") });
   if (app.tab === "bands") {
@@ -825,7 +818,7 @@ function startQuiz(topicId, practiceSkill) {
   persist(() => backend.startAttempt(profileId, play));
   app = {
     mode: "quiz", topicId, practiceSkill, bank, practiceTotal: Math.min(PRACTICE_LENGTH, bank.length), playId: play.id,
-    state: M.startQuiz({ classId: child.classId, topicId, attemptNo: attemptNoFor(topicId), seenBefore: sum.seen[topicId] || [], ...quizSettings(topicId) }),
+    state: M.startQuiz({ classId: child.classId, topicId, attemptNo: attemptNoFor(topicId), seenBefore: sum.seen[topicId] || [], ...quizSettings() }),
     phase: "ask", feedback: null, prevMarks: 0, delta: null,
   };
   app.q = M.nextQuestion(app.state, app.bank);
@@ -892,14 +885,12 @@ function renderDash() {
   const clearedCount = states.filter(s => s.state === "cleared").length;
   const totalStars = Object.values(sum.stars).reduce((a, b) => a + b, 0);
   const next = M.nextClass(child.classId);
-  const passMarks = topics.map(t => quizSettings(t.id).passMarks);
-  const samePass = passMarks.every(m => m === passMarks[0]);
+  const pass = quizSettings().passMarks, passPct = (pass / MAX) * 100;
 
   const rows = topics.map((t, i) => {
     const e = sum.progress.topics[t.id];
     const stars = sum.stars[t.id] || 0;
     const bestPct = Math.min(100, (e.bestScore / MAX) * 100);
-    const pass = passMarks[i], passPct = (pass / MAX) * 100;
     const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
     const score = e.attempts
       ? `<span>Best ${e.bestScore} / ${MAX}</span><span class="mini" aria-hidden="true"><b class="${e.bestScore >= pass ? "ok" : ""}" style="width:${bestPct}%"></b><i style="left:${passPct}%"></i></span><span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>${stars ? `<span class="stars-sm" aria-label="${stars} stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</span>` : ""}`
@@ -910,7 +901,7 @@ function renderDash() {
     const newq = e.state === "locked" ? "" : `<button class="linkbtn" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "New questions"}</button>`;
     return `<div class="topic ${e.state}">
       <span class="num" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>
-      <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}${samePass ? "" : `<span>Pass ${pass}</span>`}</div></div>
+      <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
       <div class="act">${act}${newq}</div></div>`;
   }).join("");
 
@@ -952,7 +943,7 @@ function renderDash() {
     </div>
     <div class="overall">
       <div class="segs" aria-label="${clearedCount} of ${topics.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
-      <p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. ${samePass ? `Each quiz needs ${passMarks[0]} of ${MAX} marks.` : "Each topic shows the marks it needs."}`}</p>
+      <p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. Each quiz needs ${passPercent()}% (${pass} of ${MAX} marks).`}</p>
     </div>
     <div class="topics">${rows}</div>
     <div class="panels">

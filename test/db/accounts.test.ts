@@ -61,8 +61,7 @@ const backendFor = (id: string) => supabaseBackend(api.clientFor(id), signedInAs
 async function resetWorld() {
   await db.query("delete from public.questions where id like 'demo-%'");
   await new PgQuestionStore(db).save(checkQuestions(DEMO_REVIEW_SAMPLES, ALL_CONTENT.map(topicInfo)));
-  await db.query(`update public.topic_settings set pass_marks = 44, pass_marks_min = 44, pass_marks_max = 60,
-    wrong_penalty = 1, wrong_penalty_min = 1, wrong_penalty_max = 2`);
+  await db.query("update public.class_settings set pass_percent = 65, wrong_penalty = 1");
   await db.query("begin");
   await db.query(`update public.level_bands set min_rate = case level when 1 then 0.85 when 2 then 0.65 when 3 then 0.5 else 0 end,
     max_rate = case level when 1 then 1 when 2 then 0.85 when 3 then 0.65 else 0.5 end`);

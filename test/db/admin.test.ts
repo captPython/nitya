@@ -30,9 +30,11 @@ const review = (user: string | null, id: string, decision: string, fixed: unknow
   as(db, user, q => q.query("select public.review_question($1, $2, 'checked', $3, $4)", [id, decision, fixed, report]));
 
 describe("the admin panel migration", () => {
-  it("lets parents raise a topic's pass mark to 60 and the penalty to 2, and no further", async () => {
-    const { rows } = await db.query("select distinct pass_marks, pass_marks_min, pass_marks_max, wrong_penalty, wrong_penalty_min, wrong_penalty_max from public.topic_settings");
-    expect(rows).toEqual([{ pass_marks: 44, pass_marks_min: 44, pass_marks_max: 60, wrong_penalty: 1, wrong_penalty_min: 1, wrong_penalty_max: 2 }]);
+  it("replaces the per-topic settings with one default per class", async () => {
+    const { rows } = await db.query("select to_regclass('public.topic_settings') t, to_regclass('public.profile_topic_settings') p");
+    expect(rows).toEqual([{ t: null, p: null }]);
+    const { rows: classes } = await db.query("select distinct pass_percent, wrong_penalty from public.class_settings");
+    expect(classes).toEqual([{ pass_percent: 65, wrong_penalty: 1 }]);
   });
 
   it("lets only an admin review a question, once, and records who did", async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyEdits, canFixHere, editsOf, recheck } from "../src/admin/review";
 import {
-  bandCutsProblem, bandsOf, childSettingsProblem, cutsOf, defaultTopicSettings, effectiveSettings, topicSettingsProblems,
+  bandCutsProblem, bandsOf, childSettingsProblem, classSettingsProblems, cutsOf, defaultClassSettings, effectiveSettings, passMarksFor, QUIZ_LIMITS,
 } from "../src/admin/settings";
 import { DEMO_REVIEW_SAMPLES } from "../src/accounts/demo-samples";
 import { ALL_CONTENT } from "../src/content";
@@ -9,36 +9,38 @@ import { parseWorking, topicInfo, workingText } from "../src/supply";
 import type { Working } from "../src/types";
 import { DEFAULT_BANDS } from "../src/validation";
 
-const T = defaultTopicSettings("ukg-counting-50");
+const UKG = defaultClassSettings("UKG");
 const topics = ALL_CONTENT.map(topicInfo);
+const none = { passPercent: null, wrongPenalty: null };
 
-describe("topic settings", () => {
-  it("start at 44 of 68 and 1 mark off, and parents can only make a topic harder", () => {
-    expect(T).toEqual({ topicId: "ukg-counting-50", passMarks: 44, passMarksMin: 44, passMarksMax: 60, wrongPenalty: 1, wrongPenaltyMin: 1, wrongPenaltyMax: 2 });
-    expect(topicSettingsProblems(T, 68)).toEqual([]);
+describe("class settings", () => {
+  it("start at 65% (44 of 68 marks) and 1 mark off for every class", () => {
+    expect(UKG).toEqual({ classId: "UKG", passPercent: 65, wrongPenalty: 1 });
+    expect(classSettingsProblems(UKG)).toEqual([]);
+    expect(effectiveSettings(UKG)).toEqual({ passMarks: 44, wrongPenalty: 1 });
   });
 
-  it("use the parent's choice for that child, kept inside the admin's limits", () => {
-    expect(effectiveSettings(T)).toEqual({ passMarks: 44, wrongPenalty: 1 });
-    expect(effectiveSettings(T, { topicId: T.topicId, passMarks: 52, wrongPenalty: null })).toEqual({ passMarks: 52, wrongPenalty: 1 });
-    // The admin narrowed the range after the parent chose 58.
-    expect(effectiveSettings({ ...T, passMarksMax: 50 }, { topicId: T.topicId, passMarks: 58, wrongPenalty: 2 })).toEqual({ passMarks: 50, wrongPenalty: 2 });
+  it("turn a percentage into the nearest mark", () => {
+    expect([1, 50, 65, 80, 90, 100].map(p => passMarksFor("UKG", p))).toEqual([1, 34, 44, 54, 61, 68]);
   });
 
-  it("refuse a parent's choice outside the limits", () => {
-    expect(childSettingsProblem(T, { topicId: T.topicId, passMarks: 60, wrongPenalty: 2 })).toBeNull();
-    expect(childSettingsProblem(T, { topicId: T.topicId, passMarks: 40, wrongPenalty: null })).toBe("The pass mark can be 44 to 60.");
-    expect(childSettingsProblem(T, { topicId: T.topicId, passMarks: 50.5, wrongPenalty: null })).toBe("The pass mark can be 44 to 60.");
-    expect(childSettingsProblem(T, { topicId: T.topicId, passMarks: null, wrongPenalty: 0 })).toBe("The penalty can be 1 to 2.");
+  it("use the parent's choice for that child on every topic, higher or lower than the default", () => {
+    expect(effectiveSettings(UKG, none)).toEqual({ passMarks: 44, wrongPenalty: 1 });
+    expect(effectiveSettings(UKG, { passPercent: 80, wrongPenalty: null })).toEqual({ passMarks: 54, wrongPenalty: 1 });
+    expect(effectiveSettings(UKG, { passPercent: 50, wrongPenalty: 0 })).toEqual({ passMarks: 34, wrongPenalty: 0 });
+    // A child without a choice follows the admin's new default; one with a choice keeps it.
+    expect(effectiveSettings({ ...UKG, passPercent: 75 }, none)).toEqual({ passMarks: 51, wrongPenalty: 1 });
+    expect(effectiveSettings({ ...UKG, passPercent: 75 }, { passPercent: 60, wrongPenalty: null })).toEqual({ passMarks: 41, wrongPenalty: 1 });
   });
 
-  it("catch an admin's settings that don't make sense", () => {
-    expect(topicSettingsProblems({ ...T, passMarksMax: 70 }, 68)).toEqual(["The highest pass mark can't be more than 68, the most marks a quiz can give."]);
-    expect(topicSettingsProblems({ ...T, passMarks: 62 }, 68)).toEqual(["The default pass mark must be inside the parents' range."]);
-    expect(topicSettingsProblems({ ...T, passMarksMin: 61 }, 68)).toEqual(["The lowest pass mark is above the highest."]);
-    expect(topicSettingsProblems({ ...T, wrongPenaltyMax: 5 }, 68)).toEqual(["The biggest penalty can't be more than 4."]);
-    expect(topicSettingsProblems({ ...T, wrongPenalty: 3 }, 68)).toEqual(["The default penalty must be inside the parents' range."]);
-    expect(topicSettingsProblems({ ...T, passMarks: 44.5 }, 68)).toEqual(["Use whole numbers."]);
+  it("keep any choice inside what a quiz allows: 1% to 100%, and 0 to 4 marks off", () => {
+    expect(QUIZ_LIMITS).toEqual({ passPercent: { min: 1, max: 100 }, wrongPenalty: { min: 0, max: 4 } });
+    for (const ok of [none, { passPercent: 1, wrongPenalty: 0 }, { passPercent: 100, wrongPenalty: 4 }]) expect(childSettingsProblem(ok)).toBeNull();
+    expect(childSettingsProblem({ passPercent: 0, wrongPenalty: null })).toBe("The pass mark can be 1% to 100%.");
+    expect(childSettingsProblem({ passPercent: 101, wrongPenalty: null })).toBe("The pass mark can be 1% to 100%.");
+    expect(childSettingsProblem({ passPercent: 70.5, wrongPenalty: null })).toBe("The pass mark can be 1% to 100%.");
+    expect(childSettingsProblem({ passPercent: null, wrongPenalty: 5 })).toBe("Marks off can be 0 to 4.");
+    expect(classSettingsProblems({ ...UKG, passPercent: 101, wrongPenalty: -1 })).toEqual(["The pass mark can be 1% to 100%.", "Marks off can be 0 to 4."]);
   });
 });
 

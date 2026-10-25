@@ -1,11 +1,48 @@
 -- Nitya: what the admin panel needs on top of the earlier migrations.
 
--- Parents may make a topic harder for their child, never easier: a pass mark
--- from 44 to 60 of 68, and 1 or 2 marks off for a wrong first try (cp's
--- choice, 2026-10-25). The admin can change these per topic in the panel.
-update public.topic_settings
-   set pass_marks_min = 44, pass_marks_max = 60, wrong_penalty_min = 1, wrong_penalty_max = 2
- where pass_marks_min = 44 and pass_marks_max = 44 and wrong_penalty_min = 1 and wrong_penalty_max = 1;
+-- Quiz settings by class, not by topic (cp, 2026-10-25). The admin sets one
+-- default pass mark and one default marks-off for each class, and every topic
+-- in the class uses them. A parent can change both for one child, for all of
+-- that child's topics, higher or lower, within what a quiz allows: a pass mark
+-- of 1% to 100% and 0 to 4 marks off. The pass mark is a percentage of the
+-- most marks a quiz gives (68), to the nearest mark: 65% is 44. This replaces
+-- the first schema's per-topic settings. The app's src/admin/settings.ts has
+-- the same rules.
+drop function public.effective_topic_settings(uuid, text);
+drop table public.profile_topic_settings;
+drop function public.check_profile_topic_settings();
+drop table public.topic_settings;
+
+create table public.class_settings (
+  class_id public.class_id primary key,
+  pass_percent int not null default 65 check (pass_percent between 1 and 100),
+  wrong_penalty int not null default 1 check (wrong_penalty between 0 and 4),
+  updated_at timestamptz not null default now()
+);
+create trigger class_settings_touch before update on public.class_settings
+  for each row execute function public.touch_updated_at();
+insert into public.class_settings (class_id) select unnest(enum_range(null::public.class_id));
+
+alter table public.class_settings enable row level security;
+create policy "read class settings" on public.class_settings for select to authenticated using (true);
+create policy "admins change class settings" on public.class_settings for update to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+grant select, update (pass_percent, wrong_penalty) on public.class_settings to authenticated;
+
+-- A parent's choice for one child. Null means the class default.
+alter table public.profiles
+  add column pass_percent int check (pass_percent between 1 and 100),
+  add column wrong_penalty int check (wrong_penalty between 0 and 4);
+
+-- The settings a child's quizzes use: the parent's choice if set, else the class default.
+create function public.effective_quiz_settings(p_profile uuid)
+returns table (pass_percent int, wrong_penalty int)
+language sql stable set search_path = '' as $$
+  select coalesce(p.pass_percent, c.pass_percent), coalesce(p.wrong_penalty, c.wrong_penalty)
+  from public.profiles p
+  join public.class_settings c on c.class_id = p.class_id
+  where p.id = p_profile;
+$$;
 
 -- An admin's decision on a question in the review queue, all at once: the
 -- question's new status (and new content, for a fix, with its new check run)

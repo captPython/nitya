@@ -10,7 +10,7 @@ export { hashPin, verifyPin, pinProblem, PIN_TRIES, PIN_WAIT_SECONDS } from "./a
 export { placementQuestions, placementSuggestion, PLACEMENT_LENGTH } from "./accounts/placement";
 export { summarize, emptyProfileData } from "./accounts/progress";
 export {
-  defaultTopicSettings, effectiveSettings, topicSettingsProblems, childSettingsProblem, cutsOf, bandsOf, bandCutsProblem,
+  defaultClassSettings, effectiveSettings, classSettingsProblems, childSettingsProblem, QUIZ_LIMITS, PASS_PERCENT, passMarksFor, cutsOf, bandsOf, bandCutsProblem,
 } from "./admin/settings";
 export { applyEdits, editsOf, recheck, canFixHere } from "./admin/review";
 export { reportProblems } from "./supply/run";

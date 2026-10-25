@@ -1,8 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ReviewEntry } from "../admin/review";
-import { bandCutsProblem, topicSettingsProblems, type ChildSettings, type TopicSettings } from "../admin/settings";
-import { ALL_CONTENT } from "../content";
-import { maxMarks } from "../engine";
+import { bandCutsProblem, childSettingsProblem, classSettingsProblems, type ClassSettings } from "../admin/settings";
 import { QUESTION_COLUMNS, toQuestion, toRow as questionRow, type QuestionRow } from "../supply/rows";
 import type { ClassId, Level, TopicState } from "../types";
 import type { CheckReport } from "../validation";
@@ -50,14 +48,9 @@ function must<T>(res: { data: T | null; error: { message: string } | null }): T 
   return res.data as T;
 }
 
-interface SettingsRow {
-  topic_id: string; pass_marks: number; pass_marks_min: number; pass_marks_max: number;
-  wrong_penalty: number; wrong_penalty_min: number; wrong_penalty_max: number;
-}
-const toSettings = (r: SettingsRow): TopicSettings => ({
-  topicId: r.topic_id, passMarks: r.pass_marks, passMarksMin: r.pass_marks_min, passMarksMax: r.pass_marks_max,
-  wrongPenalty: r.wrong_penalty, wrongPenaltyMin: r.wrong_penalty_min, wrongPenaltyMax: r.wrong_penalty_max,
-});
+const CLASS_SETTINGS = "class_id, pass_percent, wrong_penalty";
+interface ClassSettingsRow { class_id: ClassId; pass_percent: number; wrong_penalty: number }
+const toClassSettings = (r: ClassSettingsRow): ClassSettings => ({ classId: r.class_id, passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty });
 
 /** Calls the New questions server function (see src/server). */
 export type NewQuestionsCall = (body: { topicId: string; profileId?: string }) => Promise<NewQuestionsResult>;
@@ -196,24 +189,23 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuest
       return rows.map(toQuestion);
     },
     newQuestions: (topicId, profileId) => newQuestions(profileId ? { topicId, profileId } : { topicId }),
-    async topicSettings() {
-      return (must(await client.from("topic_settings").select("*").order("topic_id")) as SettingsRow[]).map(toSettings);
+    async classSettings() {
+      return (must(await client.from("class_settings").select(CLASS_SETTINGS).order("class_id")) as ClassSettingsRow[]).map(toClassSettings);
     },
     async childSettings(profileId) {
-      const rows = must(await client.from("profile_topic_settings").select("topic_id, pass_marks, wrong_penalty").eq("profile_id", profileId).order("topic_id")) as
-        { topic_id: string; pass_marks: number | null; wrong_penalty: number | null }[];
-      return rows.map((r): ChildSettings => ({ topicId: r.topic_id, passMarks: r.pass_marks, wrongPenalty: r.wrong_penalty }));
+      const r = must(await client.from("profiles").select("pass_percent, wrong_penalty").eq("id", profileId).maybeSingle()) as
+        { pass_percent: number | null; wrong_penalty: number | null } | null;
+      if (!r) throw new Error("That profile isn't in this account.");
+      return { passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty };
     },
     async saveChildSettings(profileId, c) {
-      if (c.passMarks === null && c.wrongPenalty === null) {
-        must(await client.from("profile_topic_settings").delete().eq("profile_id", profileId).eq("topic_id", c.topicId));
-        return;
-      }
-      // The database refuses values outside the admin's limits, and other families' children.
-      must(await client.from("profile_topic_settings").upsert(
-        { profile_id: profileId, topic_id: c.topicId, pass_marks: c.passMarks, wrong_penalty: c.wrongPenalty },
-        { onConflict: "profile_id,topic_id" },
-      ));
+      // The database checks this too; checking first gives the parent a plain message.
+      const problem = childSettingsProblem(c);
+      if (problem) throw new Error(problem);
+      const rows = must(await client.from("profiles").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty })
+        .eq("id", profileId).select("id")) as unknown[];
+      // Row-level security hides other families' children, so nothing changes.
+      if (rows.length !== 1) throw new Error("That profile isn't in this account.");
     },
 
     async reviewQueue() {
@@ -234,14 +226,11 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuest
         p_fixed: fixed, p_report: review.decision === "fixed" ? review.report : null,
       }));
     },
-    async saveTopicSettings(t) {
-      const content = ALL_CONTENT.find(c => c.topic.id === t.topicId);
-      const problems = topicSettingsProblems(t, maxMarks(content?.topic.classId ?? "UKG"));
+    async saveClassSettings(c) {
+      const problems = classSettingsProblems(c);
       if (problems.length) throw new Error(problems.join(" "));
-      const rows = must(await client.from("topic_settings").update({
-        pass_marks: t.passMarks, pass_marks_min: t.passMarksMin, pass_marks_max: t.passMarksMax,
-        wrong_penalty: t.wrongPenalty, wrong_penalty_min: t.wrongPenaltyMin, wrong_penalty_max: t.wrongPenaltyMax,
-      }).eq("topic_id", t.topicId).select("topic_id")) as unknown[];
+      const rows = must(await client.from("class_settings").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty })
+        .eq("class_id", c.classId).select("class_id")) as unknown[];
       // Row-level security hides the row from anyone but an admin, so nothing changes.
       if (rows.length !== 1) throw new NotAdmin();
     },

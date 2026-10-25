@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { applyEdits, editsOf, recheck } from "../src/admin/review";
-import { defaultTopicSettings } from "../src/admin/settings";
+import { defaultClassSettings } from "../src/admin/settings";
 import { DEMO_REVIEW_SAMPLES } from "../src/accounts/demo-samples";
 import { ALL_CONTENT } from "../src/content";
 import { UKG_TOPICS } from "../src/content/ukg";
 import type { AccountBackend } from "../src/accounts/backend";
 import type { ProfileDetails } from "../src/accounts/options";
 import { topicInfo } from "../src/supply";
+import { CLASS_ORDER } from "../src/types";
 import { DEFAULT_BANDS } from "../src/validation";
 
 const RIYA: ProfileDetails = { nickname: "Riya", avatar: "owl", classId: "UKG", board: "CBSE", language: "en" };
@@ -129,34 +130,39 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       expect(sampleIds(served.map(q => q.id))).toEqual([]);
     });
 
-    it("starts every topic at a pass mark of 44 (parents 44 to 60) and a penalty of 1 (parents 1 or 2)", async () => {
+    it("starts every class at a pass mark of 65% and 1 mark off", async () => {
       const b = await (await newWorld()).family();
-      const settings = await b.topicSettings();
-      for (const t of UKG_TOPICS) expect(settings.find(s => s.topicId === t.topic.id)).toEqual(defaultTopicSettings(t.topic.id));
+      expect(await b.classSettings()).toEqual(CLASS_ORDER.map(id => defaultClassSettings(id)));
       expect(await b.levelBands()).toEqual(DEFAULT_BANDS);
     });
 
-    it("keeps a parent's change to one child inside the admin's limits, for that child only", async () => {
+    it("keeps a parent's choice for one child, for all of that child's topics, inside what a quiz allows", async () => {
       const w = await newWorld();
       const b = await w.family();
       await b.giveConsent(V);
       const riya = await b.createProfile(RIYA);
       const kabir = await b.createProfile(KABIR);
-      const topicId = COUNTING.topic.id;
-      await b.saveChildSettings(riya.id, { topicId, passMarks: 50, wrongPenalty: 2 });
-      expect(await b.childSettings(riya.id)).toEqual([{ topicId, passMarks: 50, wrongPenalty: 2 }]);
-      expect(await b.childSettings(kabir.id)).toEqual([]);
-      await expect(b.saveChildSettings(riya.id, { topicId, passMarks: 61, wrongPenalty: null })).rejects.toThrow("44 to 60");
-      await expect(b.saveChildSettings(riya.id, { topicId, passMarks: 43, wrongPenalty: null })).rejects.toThrow("44 to 60");
-      await expect(b.saveChildSettings(riya.id, { topicId, passMarks: null, wrongPenalty: 3 })).rejects.toThrow("1 to 2");
-      expect(await b.childSettings(riya.id)).toEqual([{ topicId, passMarks: 50, wrongPenalty: 2 }]);
+      const none = { passPercent: null, wrongPenalty: null };
+      expect(await b.childSettings(riya.id)).toEqual(none);
+      await b.saveChildSettings(riya.id, { passPercent: 80, wrongPenalty: 2 });
+      expect(await b.childSettings(riya.id)).toEqual({ passPercent: 80, wrongPenalty: 2 });
+      expect(await b.childSettings(kabir.id)).toEqual(none);
+      await expect(b.saveChildSettings(riya.id, { passPercent: 101, wrongPenalty: null })).rejects.toThrow("1% to 100%");
+      await expect(b.saveChildSettings(riya.id, { passPercent: 0, wrongPenalty: null })).rejects.toThrow("1% to 100%");
+      await expect(b.saveChildSettings(riya.id, { passPercent: null, wrongPenalty: 5 })).rejects.toThrow("0 to 4");
+      expect(await b.childSettings(riya.id)).toEqual({ passPercent: 80, wrongPenalty: 2 });
+      // Easier than the default is fine too.
+      await b.saveChildSettings(kabir.id, { passPercent: 50, wrongPenalty: 0 });
+      expect(await b.childSettings(kabir.id)).toEqual({ passPercent: 50, wrongPenalty: 0 });
+      // Editing the profile keeps the choice.
+      await b.updateProfile(riya.id, { ...RIYA, nickname: "Riya S" });
+      expect(await b.childSettings(riya.id)).toEqual({ passPercent: 80, wrongPenalty: 2 });
       const other = await w.family();
       await other.giveConsent(V);
-      await expect(other.saveChildSettings(riya.id, { topicId, passMarks: 55, wrongPenalty: null })).rejects.toThrow();
-      // Another family is refused, or simply sees nothing.
-      expect(await other.childSettings(riya.id).catch(() => [])).toEqual([]);
-      await b.saveChildSettings(riya.id, { topicId, passMarks: null, wrongPenalty: null });
-      expect(await b.childSettings(riya.id)).toEqual([]);
+      await expect(other.saveChildSettings(riya.id, { passPercent: 90, wrongPenalty: null })).rejects.toThrow("isn't in this account");
+      await expect(other.childSettings(riya.id)).rejects.toThrow("isn't in this account");
+      await b.saveChildSettings(riya.id, none);
+      expect(await b.childSettings(riya.id)).toEqual(none);
     });
 
     it("lets only an admin see the review queue", async () => {
@@ -205,16 +211,16 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       expect(sampleIds((await admin.reviewQueue()).map(e => e.question.id))).toEqual(["demo-csv-no-working", "demo-duplicate-options"]);
     });
 
-    it("lets only an admin change a topic's settings and the level bands", async () => {
+    it("lets only an admin change a class's defaults and the level bands", async () => {
       const w = await newWorld();
       const admin = await w.admin();
       const b = await w.family();
-      const topicId = COUNTING.topic.id;
-      const harder = { ...defaultTopicSettings(topicId), passMarks: 46, passMarksMax: 64 };
-      await expect(b.saveTopicSettings(harder)).rejects.toThrow(/only an admin/i);
-      await expect(admin.saveTopicSettings({ ...harder, passMarks: 70 })).rejects.toThrow();
-      await admin.saveTopicSettings(harder);
-      expect((await b.topicSettings()).find(s => s.topicId === topicId)).toEqual(harder);
+      const harder = { classId: "UKG", passPercent: 75, wrongPenalty: 2 } as const;
+      await expect(b.saveClassSettings(harder)).rejects.toThrow(/only an admin/i);
+      await expect(admin.saveClassSettings({ ...harder, passPercent: 101 })).rejects.toThrow("1% to 100%");
+      await admin.saveClassSettings(harder);
+      expect((await b.classSettings()).find(c => c.classId === "UKG")).toEqual(harder);
+      expect((await b.classSettings()).find(c => c.classId === "C1")).toEqual(defaultClassSettings("C1"));
 
       await expect(b.saveLevelBands({ l1: 80, l2: 60, l3: 45 })).rejects.toThrow(/only an admin/i);
       await expect(admin.saveLevelBands({ l1: 60, l2: 80, l3: 45 })).rejects.toThrow();

@@ -1,6 +1,4 @@
-import { bandCutsProblem, childSettingsProblem, topicSettingsProblems, type ChildSettings } from "../admin/settings";
-import { ALL_CONTENT } from "../content";
-import { maxMarks } from "../engine";
+import { bandCutsProblem, childSettingsProblem, classSettingsProblems, type ChildSettings } from "../admin/settings";
 import type { Account, AccountBackend, AttemptResult, NewAttempt } from "./backend";
 import { NoConsent, NotAdmin, NotSignedIn } from "./backend";
 import { DemoBank } from "./demo-bank";
@@ -18,8 +16,8 @@ interface DemoParent {
   consentAt: string | null;
   profiles: Profile[];
   data: Record<string, ProfileData>;
-  /** A parent's choices per child, for the topics they changed. */
-  settings?: Record<string, ChildSettings[]>;
+  /** A parent's choice per child, for all of that child's topics. (Step 6's first version kept per-topic choices under `settings`; they are ignored.) */
+  quiz?: Record<string, ChildSettings>;
 }
 
 interface DemoState {
@@ -77,11 +75,6 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
   };
   const admin = () => {
     if (!signedIn().account.isAdmin) throw new NotAdmin();
-  };
-  const settingsFor = (topicId: string) => {
-    const t = bank.topicSettings().find(x => x.topicId === topicId);
-    if (!t) throw new Error("That topic isn't in Nitya.");
-    return t;
   };
   const findAttempt = (parent: DemoParent, attemptId: string) => {
     for (const data of Object.values(parent.data)) {
@@ -144,7 +137,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
         if (!p.profiles.some(x => x.id === id)) throw new Error("That profile isn't in this account.");
         p.profiles = p.profiles.filter(x => x.id !== id);
         delete p.data[id];
-        if (p.settings) delete p.settings[id];
+        if (p.quiz) delete p.quiz[id];
       });
     },
     async profileData(profileId) {
@@ -190,29 +183,26 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
       if (profileId) own(parent, profileId);
       return bank.newQuestions(topicId, profileId);
     },
-    async topicSettings() { signedIn(); return bank.topicSettings(); },
+    async classSettings() { signedIn(); return bank.classSettings(); },
     async childSettings(profileId) {
-      return change((_, p) => { own(p, profileId); return structuredClone(p.settings?.[profileId] ?? []); });
+      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, ...p.quiz?.[profileId] }; });
     },
     async saveChildSettings(profileId, c) {
-      const problem = childSettingsProblem(settingsFor(c.topicId), c);
-      if (problem) throw new Error(problem);
       change((_, p) => {
         own(p, profileId);
-        const list = ((p.settings ??= {})[profileId] ??= []).filter(x => x.topicId !== c.topicId);
-        if (c.passMarks !== null || c.wrongPenalty !== null) list.push({ ...c });
-        p.settings[profileId] = list;
+        const problem = childSettingsProblem(c);
+        if (problem) throw new Error(problem);
+        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty };
       });
     },
 
     async reviewQueue() { admin(); return bank.reviewQueue(); },
     async reviewQuestion(questionId, review) { admin(); await bank.review(questionId, review); },
-    async saveTopicSettings(t) {
+    async saveClassSettings(c) {
       admin();
-      const content = ALL_CONTENT.find(c => c.topic.id === t.topicId);
-      const problems = topicSettingsProblems(t, maxMarks(content?.topic.classId ?? "UKG"));
+      const problems = classSettingsProblems(c);
       if (problems.length) throw new Error(problems.join(" "));
-      bank.saveTopicSettings(t);
+      bank.saveClassSettings(c);
     },
     async levelBands() { signedIn(); return bank.levelBands(); },
     async saveLevelBands(cuts) {

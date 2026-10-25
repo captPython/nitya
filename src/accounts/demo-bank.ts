@@ -1,10 +1,10 @@
 import type { Review, ReviewEntry } from "../admin/review";
-import { bandsOf, defaultTopicSettings, type BandCuts, type TopicSettings } from "../admin/settings";
+import { bandsOf, defaultClassSettings, type BandCuts, type ClassSettings } from "../admin/settings";
 import { ALL_CONTENT } from "../content";
 import { checkQuestions, topicInfo } from "../supply/check";
 import { MemoryQuestionStore } from "../supply/memory-store";
 import { addNewQuestions, seedBank } from "../supply/run";
-import type { Question } from "../types";
+import { CLASS_ORDER, type ClassId, type Question } from "../types";
 import { DEFAULT_BANDS, type LevelBand } from "../validation";
 import type { NewQuestionsResult, QuestionRequestLog } from "./backend";
 import { DEMO_REVIEW_SAMPLES } from "./demo-samples";
@@ -17,7 +17,8 @@ type DemoEvent =
 
 interface DemoBankState {
   events: DemoEvent[];
-  settings: Record<string, TopicSettings>;
+  /** The admin's class defaults. (Step 6's first version kept topic settings under `settings`; they are ignored.) */
+  classes?: Partial<Record<ClassId, ClassSettings>>;
   cuts: BandCuts | null;
   requests: QuestionRequestLog[];
 }
@@ -27,7 +28,7 @@ const byId = (topicId: string) => ALL_CONTENT.find(c => c.topic.id === topicId);
 /**
  * The demo's stand-in for the server's side of Nitya: the question bank (the
  * built-in questions, a few planted mistakes for the review queue, and every
- * New questions press), the admin's topic settings and the level bands.
+ * New questions press), the admin's class defaults and the level bands.
  * Only the presses' seeds and the admin's decisions are kept, in this browser;
  * the bank is rebuilt from them when the page opens.
  */
@@ -43,7 +44,7 @@ export class DemoBank {
       const s = JSON.parse(this.kv.getItem(this.key) ?? "null");
       if (s && typeof s === "object" && Array.isArray(s.events)) return s as DemoBankState;
     } catch { /* start fresh */ }
-    return { events: [], settings: {}, cuts: null, requests: [] };
+    return { events: [], classes: {}, cuts: null, requests: [] };
   }
 
   private write(s: DemoBankState) {
@@ -108,15 +109,15 @@ export class DemoBank {
     if (this.built === s.events.length - 1) this.built = s.events.length;
   }
 
-  topicSettings(): TopicSettings[] {
-    const saved = this.read().settings;
-    return ALL_CONTENT.map(c => saved[c.topic.id] ?? defaultTopicSettings(c.topic.id));
+  classSettings(): ClassSettings[] {
+    const saved = this.read().classes ?? {};
+    return CLASS_ORDER.map(id => saved[id] ?? defaultClassSettings(id));
   }
 
-  saveTopicSettings(settings: TopicSettings) {
-    if (!byId(settings.topicId)) throw new Error("That topic isn't in Nitya.");
+  saveClassSettings(settings: ClassSettings) {
+    if (!CLASS_ORDER.includes(settings.classId)) throw new Error("That class isn't in Nitya.");
     const s = this.read();
-    s.settings[settings.topicId] = { ...settings };
+    (s.classes ??= {})[settings.classId] = { ...settings };
     this.write(s);
   }
 

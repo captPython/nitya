@@ -13,7 +13,7 @@ Each class has topics that unlock in order. A topic is a short lesson followed b
 - `preview/`: the app's page (`app.js`, `template.html`) and the build that makes it one HTML file, as the demo preview or the real app.
 - `src/validation/`: the validation engine that checks every question before a child sees it (see below).
 - `src/supply/`: the question supply engine: New questions, CSV import, the admin's Drive folder, and saving to the database (see below).
-- `src/admin/`: the rules behind the admin panel and parents' quiz settings: pass mark and penalty limits, level bands, and the review queue's fix form (see Admin panel below).
+- `src/admin/`: the rules behind the admin panel and parents' quiz settings: class defaults, each child's own pass mark and marks off, level bands, and the review queue's fix form (see Admin panel below).
 - `src/server/`: the New questions server function, which runs as a Supabase Edge Function from `supabase/functions/new-questions`.
 - `scripts/questions.ts`: commands that fill the question bank in the database.
 - `docs/question-template.csv`: a sample question CSV to copy.
@@ -99,7 +99,7 @@ A parent owns the account and signs in with Google or a one-time email link. Chi
 
 **Grown-ups** lists the children, and lets the parent edit a profile, change a child's quiz settings, download a profile's data as JSON, delete a profile with its progress, add a child, change the PIN and sign out.
 
-**Quiz settings:** for each topic, a parent can raise one child's pass mark (44 up to 60 of 68) and the marks off for a wrong first try (1 or 2), to push that child further. They can't go below Nitya's defaults. The admin sets the default and the range for each topic, and a choice left outside a range the admin later narrows is brought back inside it. The child's dashboard and quiz show the pass mark that child needs.
+**Quiz settings:** a parent can set one child's pass mark and the marks off for a wrong first try, higher or lower than the class default, to fit that child. One choice covers all of the child's topics. The pass mark is a percentage of the 68 marks a quiz can give, to the nearest mark (65% is 44 marks, 80% is 54), from 1% to 100%; marks off can be 0 to 4. A child whose parent hasn't chosen follows the class default. The child's dashboard shows the pass mark that child needs, and the quiz counts towards it in marks.
 
 Every quiz is saved as it is played: the play when it starts, each answer as it is given, and the marks and topic progress at the end. Practice rounds are saved too, but never change topic progress.
 
@@ -139,7 +139,7 @@ The page talks to an account backend (`src/accounts/backend.ts`), and the same t
 To make someone an admin, add their user id to `public.admins` from the Supabase dashboard. Their Grown-ups page then has **Open the admin panel**, with four tabs:
 
 - **Review queue:** every question that failed a check, with the problems the checks found. The admin approves it as it is, fixes it, or rejects it, and children never see it before it is approved. A fix is checked again before it can be saved (a fix that still fails needs a second tap), and starts the question's live results again. Questions from a CSV are fixed in their Drive file instead, so the next sync keeps the fix. Every decision is recorded with who made it.
-- **Topic settings:** each topic's pass mark and marks off, and the range parents may choose from. The pass mark can't go above the most marks a quiz gives (68), and marks off can't go above 4.
+- **Class settings:** each class's default pass mark (65% to start) and marks off (1 to start). Every topic in the class uses them, for every child whose parent hasn't chosen their own.
 - **Level bands:** where each level starts, as the share of children who get a question right first time (L1 85%+, L2 65 to 85%, L3 50 to 65%, L4 under 50%). The four bands move together, so they never leave a gap or overlap.
 - **New questions:** makes questions for any topic, shows how many approved questions each topic has, and lists the latest requests.
 
@@ -151,7 +151,7 @@ The Supabase schema lives in `supabase/migrations`:
 - `20261025100100_reference_data.sql`: the 5 UKG topics, the level bands (L1 85%+, L2 65 to 85%, L3 50 to 65%, L4 under 50%) and each topic's defaults (pass mark 44, 1 mark off for a wrong first try).
 - `20261025120000_question_requests.sql`: the log of New questions requests. A family sees only its own requests and the admin sees all; only the server writes it.
 - `20261025130000_accounts.sql`: the parent PIN hash, the fixed onboarding choices for profiles, and practice plays.
-- `20261025150000_admin_panel.sql`: lets parents raise a topic's pass mark to 60 and marks off to 2, and adds `review_question` and `set_level_bands`, which save a review or the four bands in one step and only for an admin.
+- `20261025150000_admin_panel.sql`: replaces the per-topic settings with one default per class (`class_settings`) and each child's own choice (`profiles.pass_percent` and `wrong_penalty`), and adds `review_question` and `set_level_bands`, which save a review or the four bands in one step and only for an admin.
 
 To apply them to a Supabase project, run the files in name order in the SQL editor, or use the Supabase CLI (`supabase link`, then `supabase db push`). To make someone an admin, add their user id to `public.admins` from the dashboard.
 

@@ -1,5 +1,5 @@
 import type { Review, ReviewEntry } from "../admin/review";
-import type { BandCuts, ChildSettings, TopicSettings } from "../admin/settings";
+import type { BandCuts, ChildSettings, ClassSettings } from "../admin/settings";
 import type { Question } from "../types";
 import type { LevelBand } from "../validation";
 import type { Profile, ProfileDetails } from "./options";
@@ -77,17 +77,17 @@ export interface AccountBackend {
   questions(topicId: string): Promise<Question[]>;
   /** Makes new questions from the topic's templates. A child pressing it passes their profile. */
   newQuestions(topicId: string, profileId?: string): Promise<NewQuestionsResult>;
-  /** The admin's settings for every topic. */
-  topicSettings(): Promise<TopicSettings[]>;
-  /** A parent's choices for one child, for the topics they changed. */
-  childSettings(profileId: string): Promise<ChildSettings[]>;
-  /** Saves a parent's choice for one child; nulls go back to the admin's default. */
+  /** The admin's defaults for every class. */
+  classSettings(): Promise<ClassSettings[]>;
+  /** A parent's choice for one child, for all of that child's topics. */
+  childSettings(profileId: string): Promise<ChildSettings>;
+  /** Saves a parent's choice for one child; nulls go back to the class default. */
   saveChildSettings(profileId: string, settings: ChildSettings): Promise<void>;
 
   // The admin panel. Each of these refuses anyone who isn't an admin (levelBands is for everyone).
   reviewQueue(): Promise<ReviewEntry[]>;
   reviewQuestion(questionId: string, review: Review): Promise<void>;
-  saveTopicSettings(settings: TopicSettings): Promise<void>;
+  saveClassSettings(settings: ClassSettings): Promise<void>;
   levelBands(): Promise<LevelBand[]>;
   saveLevelBands(cuts: BandCuts): Promise<void>;
   questionRequests(limit?: number): Promise<QuestionRequestLog[]>;

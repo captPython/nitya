@@ -1,22 +1,21 @@
-import { MARKS_BY_LEVEL, PASS_MARKS, WRONG_PENALTY } from "../engine";
-import type { Level } from "../types";
+import { MARKS_BY_LEVEL, WRONG_PENALTY, maxMarks } from "../engine";
+import type { ClassId, Level } from "../types";
 import { DEFAULT_BANDS, type LevelBand } from "../validation";
 
-/** The admin's settings for one topic: the defaults, and how far a parent may change them for one child. */
-export interface TopicSettings {
-  topicId: string;
-  passMarks: number;
-  passMarksMin: number;
-  passMarksMax: number;
+/**
+ * The admin's defaults for one class. Every topic in the class uses them. The
+ * pass mark is a percentage of the most marks a quiz gives, because marks
+ * confuse most parents (cp, 2026-10-25).
+ */
+export interface ClassSettings {
+  classId: ClassId;
+  passPercent: number;
   wrongPenalty: number;
-  wrongPenaltyMin: number;
-  wrongPenaltyMax: number;
 }
 
-/** A parent's choice for one child on one topic. Null means the admin's default. */
+/** A parent's choice for one child, for all of that child's topics. Null means the class default. */
 export interface ChildSettings {
-  topicId: string;
-  passMarks: number | null;
+  passPercent: number | null;
   wrongPenalty: number | null;
 }
 
@@ -26,62 +25,47 @@ export interface QuizSettings {
   wrongPenalty: number;
 }
 
-/**
- * The starting settings, the same as the database's: pass mark 44 of 68 and 1
- * mark off for a wrong first try. Parents may only make a topic harder: a pass
- * mark from 44 to 60, and a penalty of 1 or 2 (cp's choice, 2026-10-25).
- */
-export function defaultTopicSettings(topicId: string): TopicSettings {
-  return {
-    topicId, passMarks: PASS_MARKS, passMarksMin: PASS_MARKS, passMarksMax: 60,
-    wrongPenalty: WRONG_PENALTY, wrongPenaltyMin: WRONG_PENALTY, wrongPenaltyMax: 2,
-  };
-}
+/** 65% is 44 of 68 marks, the pass mark before it became a percentage. */
+export const PASS_PERCENT = 65;
 
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+/** The starting defaults for every class, the same as the database's: 65% to pass, and 1 mark off. */
+export const defaultClassSettings = (classId: ClassId): ClassSettings => ({ classId, passPercent: PASS_PERCENT, wrongPenalty: WRONG_PENALTY });
+
+/** A pass percentage as marks, to the nearest mark: 65% of 68 is 44, and 80% is 54. */
+export const passMarksFor = (classId: ClassId, percent: number) => Math.max(1, Math.round((percent * maxMarks(classId)) / 100));
 
 /**
- * The parent's value if set, else the admin's default, always kept inside the
- * admin's current limits (as the database's effective_topic_settings does), so
- * narrowing the limits later never leaves a child outside them.
+ * What a quiz allows: a pass mark from 1% to 100%, and up to 4 marks off, what
+ * the hardest right answer gives. Parents choose freely inside these, higher
+ * or lower than the class default, to fit their child (cp, 2026-10-25).
  */
-export function effectiveSettings(t: TopicSettings, child?: ChildSettings | null): QuizSettings {
-  return {
-    passMarks: clamp(child?.passMarks ?? t.passMarks, t.passMarksMin, t.passMarksMax),
-    wrongPenalty: clamp(child?.wrongPenalty ?? t.wrongPenalty, t.wrongPenaltyMin, t.wrongPenaltyMax),
-  };
+export const QUIZ_LIMITS = {
+  passPercent: { min: 1, max: 100 },
+  wrongPenalty: { min: 0, max: MARKS_BY_LEVEL[4 as Level] },
+};
+
+/** The parent's choice if set, else the class default, as the database's effective_quiz_settings does. */
+export function effectiveSettings(c: ClassSettings, child?: ChildSettings | null): QuizSettings {
+  return { passMarks: passMarksFor(c.classId, child?.passPercent ?? c.passPercent), wrongPenalty: child?.wrongPenalty ?? c.wrongPenalty };
 }
 
 const whole = (v: number) => Number.isInteger(v);
+type Range = { min: number; max: number };
+const outside = (v: number, r: Range) => !whole(v) || v < r.min || v > r.max;
 
-/** What is wrong with an admin's topic settings, in plain sentences. */
-export function topicSettingsProblems(t: TopicSettings, maxMarks: number): string[] {
+function problems(s: ChildSettings): string[] {
+  const r = QUIZ_LIMITS;
   const out: string[] = [];
-  const numbers = [t.passMarks, t.passMarksMin, t.passMarksMax, t.wrongPenalty, t.wrongPenaltyMin, t.wrongPenaltyMax];
-  if (!numbers.every(whole)) return ["Use whole numbers."];
-  if (t.passMarksMin < 1) out.push("The lowest pass mark must be at least 1.");
-  if (t.passMarksMax > maxMarks) out.push(`The highest pass mark can't be more than ${maxMarks}, the most marks a quiz can give.`);
-  if (t.passMarksMin > t.passMarksMax) out.push("The lowest pass mark is above the highest.");
-  else if (t.passMarks < t.passMarksMin || t.passMarks > t.passMarksMax) out.push("The default pass mark must be inside the parents' range.");
-  // A wrong try never costs more than the hardest right answer is worth.
-  const most = MARKS_BY_LEVEL[4 as Level];
-  if (t.wrongPenaltyMin < 0) out.push("The smallest penalty can't be below 0.");
-  if (t.wrongPenaltyMax > most) out.push(`The biggest penalty can't be more than ${most}.`);
-  if (t.wrongPenaltyMin > t.wrongPenaltyMax) out.push("The smallest penalty is above the biggest.");
-  else if (t.wrongPenalty < t.wrongPenaltyMin || t.wrongPenalty > t.wrongPenaltyMax) out.push("The default penalty must be inside the parents' range.");
+  if (s.passPercent !== null && outside(s.passPercent, r.passPercent)) out.push(`The pass mark can be ${r.passPercent.min}% to ${r.passPercent.max}%.`);
+  if (s.wrongPenalty !== null && outside(s.wrongPenalty, r.wrongPenalty)) out.push(`Marks off can be ${r.wrongPenalty.min} to ${r.wrongPenalty.max}.`);
   return out;
 }
 
-/** What is wrong with a parent's choice for one child, or null if it's fine. */
-export function childSettingsProblem(t: TopicSettings, c: ChildSettings): string | null {
-  if (c.passMarks !== null && (!whole(c.passMarks) || c.passMarks < t.passMarksMin || c.passMarks > t.passMarksMax)) {
-    return `The pass mark can be ${t.passMarksMin} to ${t.passMarksMax}.`;
-  }
-  if (c.wrongPenalty !== null && (!whole(c.wrongPenalty) || c.wrongPenalty < t.wrongPenaltyMin || c.wrongPenalty > t.wrongPenaltyMax)) {
-    return `The penalty can be ${t.wrongPenaltyMin} to ${t.wrongPenaltyMax}.`;
-  }
-  return null;
-}
+/** What is wrong with an admin's class defaults, in plain sentences. */
+export const classSettingsProblems = (c: ClassSettings): string[] => problems(c);
+
+/** What is wrong with a parent's choice for a child, or null if it's fine. */
+export const childSettingsProblem = (child: ChildSettings): string | null => problems(child)[0] ?? null;
 
 /**
  * Level bands as three cut points, in percent of first tries right: L1 is
