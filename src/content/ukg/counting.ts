@@ -54,7 +54,8 @@ const numberName: Template = r => {
     prompt: `Tap the number ${NUMBER_NAMES[n - 1]}.`,
     options: numOptions(r, n, 1, 10, 3),
     answers: [String(n)],
-    hint: `Count on your fingers up to ${NUMBER_NAMES[n - 1]}.`,
+    // Show the quantity, so the word, the amount and the written number link up without naming the answer tile.
+    hint: `${NUMBER_NAMES[n - 1][0].toUpperCase()}${NUMBER_NAMES[n - 1].slice(1)} is this many: ${"●".repeat(n)}. Which number says that?`,
     explanation: `"${NUMBER_NAMES[n - 1]}" is written ${n}.`,
     reason: `${n} is ${NUMBER_NAMES[n - 1]}.`,
     working: { kind: "number-word", word: NUMBER_NAMES[n - 1] },
@@ -104,10 +105,10 @@ const TEMPLATES: Record<Level, Template[]> = {
 export const COUNTING: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 1, title: "Counting 1 to 50" },
   lesson: [
-    { title: "One touch, one number", text: "Touch each thing once and say one number. The last number you say tells you how many.", visual: dots({ count: 5, color: "blue" }) },
-    { title: "Counting every day", text: "Count the steps as you climb the stairs. Count your toys when you tidy up. Counting is everywhere!" },
-    { title: "Rows of 10", text: "When there are lots, make rows of 10. One full row is 10. One row and 3 more: say 10, then 11, 12, 13.", visual: dots({ count: 13, color: "orange" }) },
-    { title: "Jumping in 2s, 5s and 10s", text: "10, 20, 30, 40, 50 is counting in tens. 2, 4, 6, 8 is counting in twos. Big jumps help you count faster." },
+    { title: "One touch, one number", text: "Touch each dot once as you count. The last number is how many.", visual: dots({ count: 5, color: "blue" }) },
+    { title: "Counting every day", text: "Count the stairs. Count your toys. Counting is everywhere!" },
+    { title: "Rows of 10", text: "A full row is 10. Then count on: 11, 12, 13.", visual: dots({ count: 13, color: "orange" }) },
+    { title: "Jumping in 2s, 5s and 10s", text: "Count in tens: 10, 20, 30. Count in twos: 2, 4, 6." },
   ],
   tryIt: { prompt: "How many dots?", visual: dots({ count: 7, color: "blue" }), options: ["6", "7", "8"], answer: "7",
     praise: "You counted all 7 dots!", help: "Touch each dot once: 1, 2, 3, 4, 5, 6, 7." },

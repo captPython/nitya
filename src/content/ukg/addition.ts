@@ -207,10 +207,10 @@ const TEMPLATES: Record<Level, Template[]> = {
 export const ADDITION: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 4, title: "Adding with objects up to 10" },
   lesson: [
-    { title: "Putting together", text: "Max has 2 mangoes. A friend brings 1 more. Count them: 1, 2, 3. Adding means putting things together!", visual: dots({ count: 2, color: "blue" }, { count: 1, color: "orange" }) },
-    { title: "In real life", text: "A plate has 3 biscuits. Mum adds 2 more. Count them all: 5 biscuits. + means \"and more\". = means \"makes\". 3 + 2 = 5." },
-    { title: "Count on", text: "For 4 + 2, don't start from 1. Say \"4\", then count on: 5, 6. So 4 + 2 = 6.", visual: dots({ count: 4, color: "blue" }, { count: 2, color: "orange" }) },
-    { title: "Finger trick", text: "Hold up the bigger number. Count on the smaller one. 5 + 3: say 5... 6, 7, 8." },
+    { title: "Putting together", text: "2 mangoes and 1 more. Count them all: 1, 2, 3!", visual: dots({ count: 2, color: "blue" }, { count: 1, color: "orange" }) },
+    { title: "In real life", text: "+ means \"and more\". = means \"makes\". 3 + 2 = 5." },
+    { title: "Count on", text: "For 4 + 2, say 4, then count on: 5, 6.", visual: dots({ count: 4, color: "blue" }, { count: 2, color: "orange" }) },
+    { title: "Finger trick", text: "Start at the bigger number. 5 + 3: say 5… 6, 7, 8." },
   ],
   tryIt: { prompt: "3 ducks and 2 more ducks. How many ducks?", visual: dots({ count: 3, color: "blue" }, { count: 2, color: "orange" }),
     options: ["4", "5", "6"], answer: "5", praise: "You got it! 3 ducks and 2 more make 5.", help: "Say 3, then count on: 4, 5." },

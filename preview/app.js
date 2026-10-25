@@ -150,18 +150,22 @@ async function askNewQuestions(topicId, profileId) {
 
 /* ---------- voice and sounds ---------- */
 // The playful look reads each lesson page, question, hint and praise aloud, and plays a short sound for right and
-// wrong, so a child who can't read yet can still play. A parent can turn this off for each child in Settings; the
-// choice is kept on this device. The clean look stays quiet unless the parent turns it on.
-const VOICE_KEY = id => `nitya-voice-${id}`;
-function voiceChoice(p) { try { const v = storage.getItem(VOICE_KEY(p.id)); return v === "on" || v === "off" ? v : null; } catch (e) { return null; } }
-function voiceOn(p, lookShown) { const v = voiceChoice(p); return v ? v === "on" : lookShown === "play"; }
-const childVoice = () => !!child && PLAYING.includes(app.mode) && voiceOn(child, look());
+// wrong, so a child who can't read yet can still play. A parent can turn this off for each child in Settings, and
+// it is saved with the child's settings, so it holds on every device. The clean look stays quiet unless turned on.
+const voiceOn = (mine, lookShown) => mine?.voice ?? lookShown === "play";
+function childVoice() {
+  // The placement check comes before the child's settings exist, so it follows the look.
+  if (app.mode === "placement") return look() === "play";
+  return !!child && PLAYING.includes(app.mode) && voiceOn(settings.child, look());
+}
 function speak(text) {
   try {
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    // Dots in a hint are read as counting: "●●●" says "one, two, three".
+    const u = new SpeechSynthesisUtterance(text.replace(/●+/g, m => NUMBER_WORDS.slice(0, m.length).join(", ")));
     u.rate = 0.9;
-    u.lang = child?.language === "hi" ? "hi-IN" : "en-IN";
+    // The questions are in English until Hindi ones exist, so the voice is too, whatever the profile's language.
+    u.lang = "en-IN";
     speechSynthesis.speak(u);
   } catch (e) {}
 }
@@ -193,7 +197,7 @@ function chime(kind) {
 }
 const SPEAKER = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>`;
 /** The speaker button on a speech bubble: round and big when playful, a small square when clean. */
-const sayBtn = text => `<button class="say" type="button" data-say="${esc(text)}" aria-label="Listen">${SPEAKER}</button>`;
+const sayBtn = (text, label = "Listen") => `<button class="say" type="button" data-say="${esc(text)}" aria-label="${esc(label)}">${SPEAKER}</button>`;
 screen.addEventListener("click", e => { const b = e.target.closest("[data-say]"); if (b) speak(b.dataset.say); });
 
 /* ---------- screen reader messages ---------- */
@@ -209,7 +213,7 @@ const plain = html => { const d = document.createElement("div"); d.innerHTML = h
 
 /* ---------- words that change with the look ---------- */
 const WORDS = {
-  play: { map: "Class map", again: "Play this one again", retry: "Try again" },
+  play: { map: "Class map", again: "Play again", retry: "Try again" },
   focus: { map: "All topics", again: "Retake", retry: "Retake" },
 };
 const word = k => WORDS[look()][k];
@@ -246,15 +250,18 @@ const KEYS = "ABCD";
  * The answer buttons. The clean look shows each one's key (A, B, C) and lets a keyboard press it. `tried` are the
  * child's wrong picks, which stay marked; `right` is set once the question is over, to mark the right answer.
  */
-function optionButtons(options, attr, { disabled = false, tried = [], right = null } = {}) {
+function optionButtons(options, attr, { disabled = false, tried = [], right = null, picked = null } = {}) {
+  const play = look() === "play";
   return `<div class="opts" style="--n:${options.length}">${options.map((o, i) => {
     const isRight = !!right && right.includes(o), isTried = tried.includes(o);
-    const note = isRight ? `<span class="opt-note ok">✓ Right</span>` : isTried ? `<span class="opt-note no">✗ ${look() === "play" ? "tried" : "Your try"}</span>` : "";
+    // "Right" only on the answer the child picked; after two wrong tries the answer is shown as the answer.
+    const rightNote = o === picked ? "Right" : play ? "This one" : "Answer";
+    const note = isRight ? `<span class="opt-note ok">✓ ${rightNote}</span>` : isTried ? `<span class="opt-note no">✗ ${play ? "tried" : "Your try"}</span>` : "";
     return `<button class="btn ${String(o).length > 3 ? "long" : ""} ${isRight ? "right" : isTried ? "tried" : ""}" type="button" ${attr}="${esc(o)}" ${disabled || isTried ? "disabled" : ""}>
     <span class="key" aria-hidden="true">${KEYS[i] ?? ""}</span><span class="opt-val">${esc(o)}</span>${note}</button>`;
   }).join("")}</div>`;
 }
-const keyHint = n => `<p class="keyhint small muted">Tap an answer, or press ${[...KEYS.slice(0, n)].join(", ").replace(/, ([^,]*)$/, " or $1")}.</p>`;
+const keyHint = n => `<p class="keyhint small muted">Click an answer, or press ${[...KEYS.slice(0, n)].join(", ").replace(/, ([^,]*)$/, " or $1")}.</p>`;
 
 const ICON_GOOD = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--leaf)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>`;
 const ICON_HINT = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--hint-ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg>`;
@@ -278,6 +285,7 @@ function renderSignin() {
       <button class="ghost tonal" type="submit">Email me a sign-in link</button>
     </form>
     ${errorLine()}
+    ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
     <p class="small muted">Before anything about a child is saved, Nitya shows you what it keeps and asks for your OK. <button class="linkbtn" type="button" id="notice">How Nitya uses data</button></p>
     ${DEMO ? `<p class="note">Demo: nobody is really signed in, no email is sent, and everything stays in this browser.</p>` : ""}
   </div>`;
@@ -307,7 +315,7 @@ function renderEmailSent() {
   if (open) open.onclick = () => step(async () => {
     await backend.openDemoLink();
     account = await backend.account();
-    if (app.resetPin) show({ mode: "set-pin", first: null, then: "route", reset: true });
+    if (app.resetPin) show({ mode: "set-pin", first: null, then: "route", reset: true, after: app.after });
     else await route();
   });
   document.getElementById("back").onclick = () => app.resetPin ? show({ mode: "forgot-pin" }) : show({ mode: "signin", email: app.email });
@@ -317,6 +325,16 @@ async function signOut() {
   await backend.signOut();
   account = null; child = null; data = null; sum = null; profiles = [];
   show({ mode: "signin" });
+}
+
+/** Sign out, asked once with an inline "Sign out? [Sign out] [Cancel]", the same on every screen that has it. */
+const signOutButton = () => app.confirmOut
+  ? `<span class="row"><span class="small">Sign out?</span><button class="ghost quiet danger sure" type="button" id="signout">Sign out</button><button class="ghost quiet" type="button" id="nosignout">Cancel</button></span>`
+  : `<button class="ghost quiet" type="button" id="signout">${ICONS.out}Sign out</button>`;
+function wireSignOut() {
+  document.getElementById("signout").onclick = () => app.confirmOut ? step(signOut) : (app.confirmOut = true, render(), document.getElementById("nosignout")?.focus());
+  const no = document.getElementById("nosignout");
+  if (no) no.onclick = () => { app.confirmOut = false; render(); document.getElementById("signout")?.focus(); };
 }
 
 /* ---------- consent ---------- */
@@ -330,8 +348,8 @@ function renderConsent() {
     <label class="check"><input type="checkbox" id="agree" ${app.agreed ? "checked" : ""} aria-describedby="agreeerr"> <span>${esc(M.CONSENT_AGREEMENT)}</span></label>
     <p class="error" id="agreeerr" role="alert">${app.needTick ? "Tick the box to continue." : ""}</p>
     ${errorLine()}
-    <div class="row"><button class="btn primary" type="button" id="ok">I agree</button>
-      <button class="ghost" type="button" id="signout">Sign out</button></div>
+    <div class="row"><button class="btn primary" type="button" id="ok">I agree</button></div>
+    <div class="row account">${signOutButton()}</div>
     <p class="small muted">Consent version ${esc(M.CONSENT_VERSION)}. The date you agree is kept with it.</p>
   </div>`;
   const agree = document.getElementById("agree");
@@ -344,7 +362,7 @@ function renderConsent() {
       await route();
     });
   };
-  document.getElementById("signout").onclick = () => step(signOut);
+  wireSignOut();
   document.getElementById("notice").onclick = () => show({ mode: "notice", back: app });
 }
 
@@ -413,6 +431,8 @@ function renderSetPin() {
         account = await backend.account();
         pinWrong = 0; pinLockedUntil = 0;
         if (app.then === "grownups") show({ mode: "grownups", note: "PIN changed." });
+        // After Forgot the PIN, carry on to what the PIN was asked for.
+        else if (app.after) app.after();
         else await route();
       });
     }
@@ -433,6 +453,8 @@ function renderPin() {
     pinTimer = setTimeout(() => { if (app.mode === "pin") { app.error = null; render(); } }, wait * 1000);
   }
   screen.innerHTML = pinPad("Parent PIN", app.purpose, `<button class="linkbtn" type="button" id="forgot">Forgot the PIN?</button>`);
+  // While locked, focus goes to the message, so it is read out and the next Tab reaches "Forgot the PIN?".
+  if (wait > 0) { const msg = screen.querySelector(".error"); msg.tabIndex = -1; msg.focus(); }
   document.getElementById("forgot").onclick = () => show({ mode: "forgot-pin", back: app });
   wirePinPad(pin => step(async () => {
     if (Date.now() < pinLockedUntil) { render(); return; }
@@ -454,16 +476,18 @@ function renderForgotPin() {
     ${email ? `<button class="ghost tonal" type="button" id="emailme">Email a link to ${esc(masked)}</button>` : ""}
     ${errorLine()}
     <div class="row account"><button class="ghost quiet" type="button" id="cancel">Back</button>
-      <button class="ghost quiet" type="button" id="signout">${ICONS.out}Sign out</button></div>
+      ${signOutButton()}</div>
   </div>`;
+  // What the PIN was asked for, to carry on to once the new PIN is set.
+  const after = app.back?.mode === "pin" ? app.back.then : null;
   document.getElementById("google").onclick = () => step(async () => {
     await backend.signInWithGoogle();
-    if (DEMO) show({ mode: "set-pin", first: null, then: "route", reset: true });
+    if (DEMO) show({ mode: "set-pin", first: null, then: "route", reset: true, after });
   });
   const em = document.getElementById("emailme");
-  if (em) em.onclick = () => step(async () => { await backend.sendEmailLink(email); show({ mode: "email-sent", email, resetPin: true }); });
+  if (em) em.onclick = () => step(async () => { await backend.sendEmailLink(email); show({ mode: "email-sent", email, resetPin: true, after }); });
   document.getElementById("cancel").onclick = () => show(app.back && app.back.mode !== "forgot-pin" ? { ...app.back, error: null } : { mode: "signin" });
-  document.getElementById("signout").onclick = () => step(signOut);
+  wireSignOut();
 }
 
 /* ---------- choosing a child ---------- */
@@ -475,16 +499,12 @@ function renderProfiles() {
     ${errorLine()}
     <div class="row"><button class="ghost addkid" type="button" id="add">${ICONS.plus}Add a child</button></div>
     <div class="row account"><button class="ghost quiet" type="button" id="grownups">${ICONS.settings}Grown-ups</button>
-      ${app.confirmOut
-        ? `<span class="row"><span class="small">Sign out?</span><button class="ghost quiet danger sure" type="button" id="signout">Sign out</button><button class="ghost quiet" type="button" id="nosignout">Cancel</button></span>`
-        : `<button class="ghost quiet" type="button" id="signout">${ICONS.out}Sign out</button>`}</div>
+      ${signOutButton()}</div>
   </div>`;
   screen.querySelectorAll("[data-kid]").forEach(b => b.onclick = () => step(() => openProfile(profiles.find(p => p.id === b.dataset.kid))));
   document.getElementById("add").onclick = () => askPin("To add a child.", startOnboarding);
   document.getElementById("grownups").onclick = () => askPin("To open the grown-ups' page.", () => show({ mode: "grownups" }));
-  document.getElementById("signout").onclick = () => app.confirmOut ? step(signOut) : (app.confirmOut = true, render());
-  const no = document.getElementById("nosignout");
-  if (no) no.onclick = () => { app.confirmOut = false; render(); };
+  wireSignOut();
 }
 
 /* ---------- onboarding ---------- */
@@ -509,7 +529,7 @@ function renderOnboard() {
     <div class="steps" aria-hidden="true">${ONBOARD_STEPS.map((_, i) => `<span class="${i <= app.step ? "on" : ""}"></span>`).join("")}</div></div>`;
   let body;
   if (field === "nickname") {
-    body = `<h1>${app.editing ? "Edit the profile" : "Add a child"}</h1>
+    body = `${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}<h1>${app.editing ? "Edit the profile" : "Add a child"}</h1>
       <form id="nickform" novalidate><label for="nick">What should Nitya call your child?</label>
         <input id="nick" type="text" autocomplete="off" maxlength="20" value="${esc(d.nickname)}" placeholder="e.g. Riya" aria-describedby="nickhelp">
         <p class="small muted" id="nickhelp">A nickname, not the full name. Letters only.</p>
@@ -527,8 +547,11 @@ function renderOnboard() {
     const langs = M.LANGUAGES.map(l => ({ ...l, lang: l.id === "en" ? "" : l.id, sub: l.id === "en" ? "" : "Coming soon: questions stay in English for now" }));
     body = `<h1>Language for ${nick}'s questions and voice</h1>${choiceButtons("language", langs)}`;
   }
+  // With no children yet there is nowhere to go back to, so the first step offers Sign out and deleting the account instead.
+  const noKids = app.step === 0 && !app.editing && !profiles.length;
   screen.innerHTML = `<div class="narrow">${gbar()}${steps}${body}${field !== "nickname" ? errorLine() : ""}
-    <div class="row"><button class="ghost" type="button" id="obback">${app.step === 0 ? "Cancel" : "Back"}</button></div></div>`;
+    <div class="row"><button class="ghost" type="button" id="obback">${app.step === 0 ? "Cancel" : "Back"}</button></div>
+    ${noKids ? `<div class="row account">${signOutButton()}<button class="ghost quiet danger" type="button" id="delacct">${ICONS.trash}Delete my account…</button></div>` : ""}</div>`;
 
   const form = document.getElementById("nickform");
   if (form) {
@@ -550,7 +573,11 @@ function renderOnboard() {
     if (field === "avatar") { render(); setTimeout(() => { if (app.mode === "onboard" && ONBOARD_STEPS[app.step] === "avatar") go(); }, 300); } else go();
   });
   const back = document.getElementById("obback");
-  back.hidden = app.step === 0 && !app.editing && !profiles.length;
+  back.hidden = noKids;
+  if (noKids) {
+    wireSignOut();
+    document.getElementById("delacct").onclick = () => askPin("To delete your account.", () => show({ mode: "delete-account", back: { mode: "onboard", step: 0, draft: app.draft, editing: null, back: app.back } }));
+  }
   back.onclick = () => {
     app.error = null;
     if (app.step > 0) { app.step--; render(); } else show(app.back.mode === "pin" || app.back.mode === "loading" ? { mode: "profiles" } : app.back);
@@ -581,9 +608,11 @@ async function createChild(draft) {
 /* ---------- placement check ---------- */
 function renderPlacementOffer() {
   const d = app.draft;
+  // A grown-up screen: the check itself is the child's, in the child's look.
   screen.innerHTML = `<div class="narrow">
-    <div class="mascot">${MASCOT}<div class="bubble"><h2>A quick check?</h2>
-      <p>${esc(d.nickname)} can answer ${M.PLACEMENT_LENGTH} questions, about 5 minutes, and Nitya will suggest the best class to start in. You can skip it.</p></div></div>
+    ${gbar()}<span class="label">Quick check</span><h1>A quick check for ${esc(d.nickname)}?</h1>
+    <p>${esc(d.nickname)} can answer ${M.PLACEMENT_LENGTH} questions, about 5 minutes, and Nitya will suggest the best class to start in. You can skip it.</p>
+    <p class="note">When you start, hand the phone to ${esc(d.nickname)}. There are no marks, and Nitya reads each question aloud.</p>
     ${errorLine()}
     <div class="row actions"><button class="btn primary" type="button" id="check">Start the check</button>
       <button class="ghost" type="button" id="skip">Skip and start in ${esc(className(d.classId))}</button></div></div>`;
@@ -604,7 +633,7 @@ function renderPlacement() {
     <div class="mascot">${MASCOT}<div class="bubble"><p class="prompt" tabindex="-1">${promptHtml(q.prompt)}</p>${sayBtn(q.prompt)}</div></div>
     ${dotsSvg(q.visual)}
     ${optionButtons(q.options, "data-opt")}
-    <p class="small muted">No marks here. Just do your best!</p>`;
+    <p class="small muted">${look() === "play" ? "Just do your best!" : "No marks here. Just do your best!"}</p>`;
   autoSay(`placement${app.i}`, q.prompt);
   screen.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
     app.results.push(M.checkAnswer(q, b.dataset.opt));
@@ -612,16 +641,17 @@ function renderPlacement() {
     if (++app.i < app.qs.length) render();
     else show({ mode: "placement-result", draft: app.draft, suggestion: M.placementSuggestion(app.draft.classId, app.draft.nickname, app.results, M.CLASSES_WITH_CONTENT) });
   });
-  document.getElementById("stop").onclick = () => { app.confirmStop = true; render(); };
-  wireStopCard(() => show({ mode: "placement-offer", draft: app.draft }));
+  document.getElementById("stop").onclick = () => { app.confirmStop = true; render(); document.getElementById("keepon")?.focus(); };
+  wireStopCard(() => show({ mode: "placement-offer", draft: app.draft }), "stop");
 }
 
 function renderPlacementResult() {
   const { draft: d, suggestion: s } = app;
   const differs = s.suggested !== d.classId;
   screen.innerHTML = `<div class="narrow">
-    <div class="mascot">${owl("happy")}<div class="bubble"><h2>All done!</h2><p>${esc(s.message)}</p></div></div>
-    <p class="muted">${differs ? "Grown-up, please choose the class to start in." : `${esc(d.nickname)} will start in ${esc(className(s.suggested))}.`} You can change it later in Grown-ups.</p>
+    ${gbar()}<span class="label">Quick check</span><h1>${esc(d.nickname)} finished the check</h1>
+    <p>${esc(s.message)}</p>
+    <p class="muted">${differs ? "Choose the class to start in." : `${esc(d.nickname)} will start in ${esc(className(s.suggested))}.`} You can change it later in Grown-ups.</p>
     ${errorLine()}
     <div class="row actions"><button class="btn primary" type="button" id="use">Start in ${esc(className(s.suggested))}</button>
       ${differs ? `<button class="ghost" type="button" id="keep">Keep ${esc(className(d.classId))}</button>` : ""}</div></div>`;
@@ -645,25 +675,30 @@ const ICONS = {
   book: icon(`<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>`),
   chev: icon(`<path d="M9 6l6 6-6 6"/>`),
   chart: icon(`<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>`),
+  play: `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>`,
+  pause: `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4.5" width="4.2" height="15" rx="1" fill="currentColor"/><rect x="13.8" y="4.5" width="4.2" height="15" rx="1" fill="currentColor"/></svg>`,
 };
 const GOOGLE_G = `<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
 const FLAG = `<svg width="18" height="18" viewBox="0 0 24 24" aria-label="Pass mark" role="img"><path d="M6 21V4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M6 4h12l-3 4 3 4H6z" fill="currentColor"/></svg>`;
 const NUMBER_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
-// A quiz in progress is kept on this device after every answer, so Stop, a reload or the back button can carry on later.
+// Quizzes in progress are kept on this device after every answer, one per topic (and per practice skill), so Stop,
+// a reload or the back button can carry on later, and starting another topic never throws one away.
 const QUIZ_KEY = id => `nitya-quiz-${id}`;
 const boardName = id => M.BOARDS.find(b => b.id === id)?.name ?? id;
 const languageName = id => M.LANGUAGES.find(l => l.id === id)?.name ?? id;
 const starText = n => `${n} ${n === 1 ? "star" : "stars"}`;
 /** The strip on every grown-up screen, so it is clear the child has left their own screens. */
 const gbar = () => `<div class="gbar">${ICONS.lock}<span>Grown-ups area</span></div>`;
-/** "Stop now?" with Keep going as the safe, first choice. */
+/** "Stop now?" with Keep going as the safe, first choice, a ▶ and a ⏸ for children who don't read yet, and the speaker. */
 const stopCard = (title, text, stopLabel) => `<div class="confirm" role="alertdialog" aria-labelledby="stoph" aria-describedby="stopp">
-    <b id="stoph">${esc(title)}</b><p id="stopp" class="small">${esc(text)}</p>
-    <div class="row"><button class="btn primary" type="button" id="keepon">Keep going</button><button class="ghost" type="button" id="stopnow">${esc(stopLabel)}</button></div></div>`;
-function wireStopCard(stop) {
+    <b id="stoph">${esc(title)}</b><p id="stopp" class="small">${esc(text)}</p>${sayBtn(`${title} ${text}`)}
+    <div class="row"><button class="btn primary" type="button" id="keepon">${ICONS.play}Keep going</button><button class="ghost" type="button" id="stopnow">${ICONS.pause}${esc(stopLabel)}</button></div></div>`;
+/** Wires the Stop card. Keep going hands focus back to the button that opened the card. */
+function wireStopCard(stop, opener) {
   const keep = document.getElementById("keepon");
   if (!keep) return;
-  keep.onclick = () => { app.confirmStop = false; render(); };
+  autoSay(`stop${app.mode}${app.i ?? ""}${app.state?.asked.length ?? ""}`, `${document.getElementById("stoph").textContent} ${document.getElementById("stopp").textContent}`);
+  keep.onclick = () => { app.confirmStop = false; render(); document.getElementById(opener)?.focus(); };
   document.getElementById("stopnow").onclick = () => { app.confirmStop = false; stop(); };
 }
 // What the full privacy notice says. The grievance contact is a placeholder until Nitya names one before launch.
@@ -672,7 +707,7 @@ const NOTICE = [
   ["Why", "To pick the right next question for each child, to unlock topics in order, and to show you their progress. Nothing else."],
   ["Where it is kept", "In Nitya's own database in Mumbai, India, so it comes back when you sign in on another device. It is never sold, shared or used for ads, and Nitya has no trackers, chat or links out of the app."],
   ["How long", "Until you delete it. Deleting a child in Grown-ups removes their profile and progress at once."],
-  ["Your rights", "You can see and download a child's data at any time (Grown-ups, then Settings), correct it (Edit profile), and delete it. You can withdraw consent at any time: delete each child, then sign out, and Nitya stops keeping anything new."],
+  ["Your rights", "You can see and download a child's data at any time (Grown-ups, then Settings), correct it (Edit profile), and delete it. You can withdraw consent at any time in one step: Grown-ups, then \"Withdraw consent and delete everything\". That deletes every child's profile and progress, your email, the consent record and the PIN, and signs you out."],
   ["Questions or complaints", "Write to Nitya's grievance officer. Their name and email are added here before Nitya launches."],
 ];
 
@@ -707,8 +742,11 @@ function renderGrownups() {
       : DEMO ? `<div class="panel"><span class="label">Admin (demo)</span><p class="small muted">In the real app only Nitya's admin sees the admin panel. In the demo you can try it.</p>
           <div class="row"><button class="ghost tonal" type="button" id="demoadmin">Make me the admin${ICONS.arrow}</button></div></div>` : ""}
     <div class="row account"><button class="ghost quiet" type="button" id="pin">${ICONS.lock}Change the PIN</button>
-      <button class="ghost quiet" type="button" id="signout">${ICONS.out}Sign out</button></div>
+      ${signOutButton()}</div>
     <div class="row"><button class="btn primary" type="button" id="done">${child ? `Back to ${esc(child.nickname)}` : "Choose a child"}</button></div>
+    <section class="setting danger-zone"><h3>Withdraw consent</h3>
+      <p class="small muted">Deletes every child's profile and progress, your email, the consent record and the PIN, then signs you out.</p>
+      <div class="row"><button class="ghost quiet danger" type="button" id="withdraw">${ICONS.trash}Withdraw consent and delete everything…</button></div></section>
   </div>`;
   screen.querySelectorAll("[data-settings]").forEach(b => b.onclick = () => openChildSettings(b.dataset.settings));
   screen.querySelectorAll("[data-progress]").forEach(b => b.onclick = () => openProgress(b.dataset.progress));
@@ -722,13 +760,52 @@ function renderGrownups() {
   });
   document.getElementById("add").onclick = () => startOnboarding();
   document.getElementById("pin").onclick = () => show({ mode: "set-pin", first: null, then: "grownups", cancel: () => show({ mode: "grownups" }) });
-  document.getElementById("signout").onclick = () => step(signOut);
+  wireSignOut();
+  document.getElementById("withdraw").onclick = () => show({ mode: "delete-account", back: { mode: "grownups" } });
   // Reloading the child picks up quiz settings and questions changed here or in the admin panel.
   document.getElementById("done").onclick = () => step(async () => {
     if (!child) return show({ mode: "profiles" });
     await saving;
     await openProfile(profiles.find(p => p.id === child.id) ?? child);
   });
+}
+
+/* ---------- withdrawing consent: the account and everything in it ---------- */
+function renderDeleteAccount() {
+  const names = profiles.map(p => esc(p.nickname));
+  screen.innerHTML = `<div class="narrow">
+    ${gbar()}<span class="label">Withdraw consent</span><h1>Delete everything?</h1>
+    <p>This deletes, from Nitya's database:</p>
+    <ul class="points">
+      ${profiles.length ? `<li>${names.join(", ")}: ${profiles.length === 1 ? "the profile" : "every profile"}, quiz results and progress</li>` : ""}
+      <li>Your email${account.email ? ` (${esc(account.email)})` : ""} and your sign-in</li>
+      <li>The record of your consent, and your PIN</li></ul>
+    <p class="small muted">It can't be undone. Afterwards Nitya keeps nothing about your family. You can sign up again later as a new family.</p>
+    ${profiles.length ? `<div class="row"><button class="ghost" type="button" id="dlall">${ICONS.download}Download all data first</button></div>` : ""}
+    ${app.downloaded ? `<p class="note" role="status">Downloaded <b>nitya-family.json</b>, with ${profiles.length} ${profiles.length === 1 ? "child" : "children"}.</p>` : ""}
+    <label for="confirmdel">Type DELETE to confirm</label>
+    <input id="confirmdel" type="text" autocomplete="off" autocapitalize="characters" value="">
+    ${errorLine()}
+    <div class="row"><button class="ghost danger sure" type="button" id="reallydelete" disabled>${ICONS.trash}Delete everything</button>
+      <button class="ghost quiet" type="button" id="nodelete">Cancel</button></div>
+  </div>`;
+  const typed = document.getElementById("confirmdel"), really = document.getElementById("reallydelete");
+  typed.oninput = () => { really.disabled = typed.value.trim().toUpperCase() !== "DELETE"; };
+  const dl = document.getElementById("dlall");
+  if (dl) dl.onclick = () => step(async () => {
+    const children = await Promise.all(profiles.map(async p => ({ profile: p, ...(await backend.profileData(p.id)), quizSettings: await backend.childSettings(p.id) })));
+    try { download("nitya-family.json", { exportedAt: new Date().toISOString(), email: account.email, consentVersion: account.consentVersion, children }); } catch (e) {}
+    show({ ...app, downloaded: true, error: null });
+  });
+  really.onclick = () => step(async () => {
+    const ids = profiles.map(p => p.id);
+    await backend.deleteAccount();
+    for (const id of ids) { try { storage.setItem(QUIZ_KEY(id), "null"); } catch (e) {} }
+    try { storage.setItem(CURRENT_KEY, ""); } catch (e) {}
+    account = null; child = null; data = null; sum = null; profiles = [];
+    show({ mode: "signin", note: "Your account and all its data are deleted." });
+  });
+  document.getElementById("nodelete").onclick = () => show(app.back);
 }
 
 async function loadFamily() {
@@ -764,8 +841,8 @@ async function openProgress(profileId) {
     const p = profiles.find(x => x.id === profileId);
     const [d, classes, mine] = await Promise.all([backend.profileData(p.id), backend.classSettings(), backend.childSettings(p.id)]);
     const topics = M.contentForClass(p.classId).map(c => c.topic);
-    const pass = M.effectiveSettings(classDefaults(classes, p.classId), mine).passMarks;
-    show({ mode: "child-progress", profile: p, data: d, sum: M.summarize(p.classId, topics, d), passMarks: pass });
+    const eff = M.effectiveSettings(classDefaults(classes, p.classId), mine);
+    show({ mode: "child-progress", profile: p, data: d, sum: M.summarize(p.classId, topics, d), passMarks: eff.passMarks, penalty: eff.wrongPenalty });
   });
 }
 
@@ -777,28 +854,46 @@ function renderChildProgress() {
     const e = s.progress.topics[t.id], stars = s.stars[t.id] || 0;
     const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
     const meta = e.attempts ? `Best ${e.bestScore} / ${MAX} · ${e.attempts} ${e.attempts === 1 ? "try" : "tries"}${stars ? ` · ${starText(stars)}` : ""}` : e.state === "locked" ? `Opens after topic ${i}` : "Not started";
-    return `<div class="prow"><div><div class="row" style="gap:8px"><b>${esc(t.title)}</b>${chip}</div><div class="small muted">${esc(meta)}</div></div>
-      ${e.state === "locked" ? "" : `<button class="ghost quiet" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "Get new questions"}</button>`}</div>`;
+    return `<div class="prow"><div><div class="row" style="gap:8px"><b>${esc(t.title)}</b>${chip}</div><div class="small muted">${esc(meta)}</div></div></div>`;
   }).join("");
+  const open = topics.filter(t => s.progress.topics[t.id].state !== "locked");
   const areas = weakAreas(s).map(a => `<div class="area"><div><b>${esc(byId(a.tid).subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(byId(a.tid).topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
       <span class="mini" aria-hidden="true"><b style="width:${a.acc * 100}%"></b></span></div>`).join("");
-  const lost = d.responses.reduce((a, r) => a + (r.marksDelta < 0 ? -r.marksDelta : 0), 0);
   const recent = [...d.attempts].filter(a => a.finishedAt).sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).slice(0, 6);
+  const answersOf = a => d.responses.filter(r => r.attemptId === a.id);
+  // Marks never go below 0, so a count of wrong first tries says more than the marks they took away.
+  const quizzes = recent.filter(a => !a.practice), firsts = quizzes.flatMap(answersOf);
+  const wrong = firsts.filter(r => !r.firstTryCorrect).length;
+  const day = iso => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const line = a => {
+    const rs = answersOf(a);
+    if (a.practice) {
+      const skill = rs[0] ? byId(a.topicId).subSkillNames[rs[0].subSkill] ?? rs[0].subSkill : "";
+      return `<li>${esc(day(a.startedAt))} · Practice${skill ? `: ${esc(skill)}` : ""} · ${rs.filter(r => r.firstTryCorrect).length} of ${rs.length}</li>`;
+    }
+    return `<li>${esc(day(a.startedAt))} · ${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}</li>`;
+  };
+  const next = M.nextClass(p.classId);
   screen.innerHTML = `<div class="narrow">
     ${gbar()}<h1>${name}'s progress</h1>
     <p class="muted">${esc(className(p.classId))} · ${esc(familyLine(p, d))}. Each quiz needs ${app.passMarks} of ${MAX} marks.</p>
+    ${s.promoted ? `<p class="note">${name} finished ${esc(className(p.classId))} Maths.${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}</p>` : ""}
     ${app.newqNote ? `<p class="note" role="status">${esc(app.newqNote)}</p>` : ""}
     <section class="setting"><h3>Topics</h3>${rows}
-      <p class="small muted">"Get new questions" adds fresh questions to a topic ${name} has seen a lot of. Families can ask ${M.NEW_QUESTIONS_PER_DAY} times a day.</p></section>
+      <p class="small muted">Stars: 1 for clearing a topic, 2 at ${M.TWO_STARS} marks and 3 at ${M.THREE_STARS}, whatever the pass mark.</p>
+      ${open.length ? `<details class="disc"><summary>Get new questions for a topic</summary>
+        <p class="small muted">Adds fresh questions to a topic ${name} has seen a lot of. Families can ask ${M.NEW_QUESTIONS_PER_DAY} times a day.</p>
+        ${open.map(t => `<div class="prow"><span>${esc(t.title)}</span><button class="ghost quiet" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "Get new questions"}</button></div>`).join("")}</details>` : ""}</section>
     <section class="setting"><h3>Improvement areas</h3>${areas || `<p class="small muted">Nothing to work on yet. Skills under 80% right show up here after a quiz.</p>`}</section>
     <section class="setting"><h3>Right first time, by level</h3>${levelRows(s)}</section>
     <section class="setting"><h3>Recent quizzes</h3>
-      ${recent.length ? `<div class="log">${recent.map(a => `<div><span>${esc(new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))}</span><span>${esc(topicTitle(a.topicId))}</span>
-        <span>${a.practice ? "Practice" : `${a.marks} / ${MAX}`}</span><span>${a.practice ? "" : a.cleared ? "Cleared" : "Not yet"}</span></div>`).join("")}</div>` : `<p class="small muted">No quizzes yet.</p>`}
-      <p class="small muted">Marks lost to wrong first tries: ${lost}.</p></section>
+      ${recent.length ? `<ul class="qlog">${recent.map(line).join("")}</ul>` : `<p class="small muted">No quizzes yet.</p>`}
+      ${firsts.length ? `<p class="small muted">Wrong first tries in these quizzes: ${wrong} of ${firsts.length}. Each takes away ${app.penalty} ${app.penalty === 1 ? "mark" : "marks"} now, and marks never go below 0.</p>` : ""}</section>
     <div class="row"><button class="btn primary" type="button" id="done">Back to Grown-ups</button></div>
   </div>`;
+  if (app.openTools) screen.querySelector(".disc")?.setAttribute("open", "");
   screen.querySelectorAll("[data-newq]").forEach(b => b.onclick = async () => {
+    app.openTools = true;
     await askNewQuestions(b.dataset.newq, p.id);
     if (app.mode === "child-progress") render();
   });
@@ -844,13 +939,17 @@ function renderChildSettings() {
     ["play", LOOK_NAMES.play, "Bright colours, big buttons and the owl.", "play"],
     ["focus", LOOK_NAMES.focus, "Calm colours, simple cards and A/B/C answers.", "focus"],
   ];
-  // The pass mark: the class default, two common choices, or any other number.
+  // The pass mark: the class default, two common choices, or Custom, a stepper in 5s. Every choice saves on tap.
   const presets = [[null, "Default", `${def.passPercent}%`], [50, "Gentler", "50%"], [80, "Stretch", "80%"]].filter(([v]) => v !== def.passPercent);
   const custom = app.customPass || (app.mine.passPercent !== null && !presets.some(([v]) => v === app.mine.passPercent));
   const passOn = v => !custom && app.mine.passPercent === v;
-  const warn = percent < 40 ? `That's very low: ${name} would clear a topic with only ${eff.passMarks} marks.` : percent > 90 ? "That's very high: one or two wrong first tries could mean not passing." : "";
-  const voice = voiceChoice(p) ?? (shown === "play" ? "on" : "off");
+  const marks = n => `${n} ${n === 1 ? "mark" : "marks"}`;
+  const warn = percent < 40 ? `That's very low: ${name} would clear a topic with only ${marks(eff.passMarks)}.` : percent > 90 ? "That's very high: one or two wrong first tries could mean not passing." : "";
+  // Marks off: None, 1 and 2, with 3 and 4 behind "More", since they cost more than an Easy question is worth.
+  const moreOff = app.moreOff || eff.wrongPenalty > 2;
+  const voice = app.mine.voice ?? shown === "play";
   const seg = (attr, value, on, label, sub = "") => `<button class="ghost ${on ? "on" : ""}" type="button" ${attr}="${value}" aria-pressed="${on}">${label}${sub ? `<small>${sub}</small>` : ""}</button>`;
+  const snap5 = v => Math.min(100, Math.max(5, Math.round(v / 5) * 5));
   screen.innerHTML = `<div class="narrow">
     ${gbar()}<h1>Settings for ${name}</h1>
     <section class="setting">
@@ -861,13 +960,17 @@ function renderChildSettings() {
     <section class="setting">
       <div class="row" style="justify-content:space-between"><h3>${name}'s quizzes</h3>${app.mine.passPercent !== null || app.mine.wrongPenalty !== null ? `<span class="chip current">Changed</span>` : ""}</div>
       <p class="small muted">These apply to every topic, from the next quiz. Higher pushes further; lower makes it easier.</p>
-      <span class="sublabel">Pass mark</span>
-      <div class="segctl" role="group" aria-label="Pass mark">${presets.map(([v, label, sub]) => seg("data-pass", v ?? "default", passOn(v), label, sub)).join("")}${seg("data-pass", "custom", custom, "Custom", custom ? `${percent}%` : "")}</div>
-      ${custom ? `<div class="row"><label class="inline" for="my-pass">Pass mark, in %</label><input type="number" inputmode="numeric" id="my-pass" value="${percent}" min="1" max="100">
-        <button class="ghost tonal" type="button" id="savepass">Save</button></div>` : ""}
-      <span class="sublabel">Marks off for a wrong first try</span>
-      <div class="segctl" role="group" aria-label="Marks off for a wrong first try">${[0, 1, 2, 3, 4].map(v => seg("data-pen", v, eff.wrongPenalty === v, v === 0 ? "None" : String(v), v === def.wrongPenalty ? "default" : "")).join("")}</div>
-      <p class="live" aria-live="polite">${name} needs <b>${eff.passMarks} of ${MAX}</b> marks (${percent}%) to clear a topic, and a wrong first try takes away ${eff.wrongPenalty}.</p>
+      <span class="sublabel" id="passlbl">Pass mark</span>
+      <div class="choicegrid" role="group" aria-labelledby="passlbl">${presets.map(([v, label, sub]) => seg("data-pass", v ?? "default", passOn(v), label, sub)).join("")}${seg("data-pass", "custom", custom, "Custom", custom ? `${percent}%` : "Choose")}</div>
+      ${custom ? `<div class="stepper" role="group" aria-label="Custom pass mark">
+          <button class="ghost" type="button" data-passstep="-5" aria-label="5% lower" ${percent <= 5 ? "disabled" : ""}>−</button>
+          <b aria-live="polite">${percent}%</b>
+          <button class="ghost" type="button" data-passstep="5" aria-label="5% higher" ${percent >= 100 ? "disabled" : ""}>+</button></div>` : ""}
+      <span class="sublabel" id="offlbl">Marks off for a wrong first try</span>
+      <div class="segctl" role="group" aria-labelledby="offlbl">${[0, 1, 2].map(v => seg("data-pen", v, eff.wrongPenalty === v, v === 0 ? "None" : String(v), v === def.wrongPenalty ? "default" : "")).join("")}<button class="ghost ${eff.wrongPenalty > 2 ? "on" : ""}" type="button" data-moreoff aria-expanded="${moreOff}">More<small>3 or 4</small></button></div>
+      ${moreOff ? `<div class="segctl" role="group" aria-label="More marks off">${[3, 4].map(v => seg("data-pen", v, eff.wrongPenalty === v, String(v), v === def.wrongPenalty ? "default" : "")).join("")}</div>
+        <p class="warn">3 or 4 marks off is more than an Easy question is worth (1 mark).</p>` : ""}
+      <p class="live" aria-live="polite">${name} needs <b>${eff.passMarks} of ${MAX}</b> marks (${percent}%) to clear a topic, and a wrong first try takes away ${eff.wrongPenalty === 0 ? "nothing" : marks(eff.wrongPenalty)}.</p>
       ${warn ? `<p class="warn">${warn}</p>` : ""}
       ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
       ${errorLine()}
@@ -881,8 +984,9 @@ function renderChildSettings() {
     </section>
     <section class="setting">
       <h3>Voice and sounds</h3>
-      <p class="small muted">Reads lessons, questions, hints and praise aloud, with a short sound for right and wrong. On for the playful look unless you turn it off. Kept on this device.</p>
-      <div class="segctl" role="group" aria-label="Voice and sounds">${seg("data-voice", "on", voice === "on", "On")}${seg("data-voice", "off", voice === "off", "Off")}</div>
+      <p class="small muted">Reads lessons, questions, hints and praise aloud, with a short sound for right and wrong. On for the playful look unless you turn it off. Saved for ${name} on every device.</p>
+      <div class="segctl" role="group" aria-label="Voice and sounds">${seg("data-voice", "on", voice, "On")}${seg("data-voice", "off", !voice, "Off")}</div>
+      ${app.voiceNote ? `<p class="note" role="status">${esc(app.voiceNote)}</p>` : ""}
     </section>
     <section class="setting">
       <h3>${name}'s data</h3>
@@ -907,21 +1011,18 @@ function renderChildSettings() {
   screen.querySelectorAll("[data-pick-look]").forEach(b => b.onclick = () => saveLook(b.dataset.pickLook || null));
   screen.querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
     const v = b.dataset.pass;
-    if (v === "custom") { app.customPass = true; app.note = null; render(); document.getElementById("my-pass")?.focus(); return; }
+    if (v === "custom") { app.customPass = true; app.note = null; render(); screen.querySelector("[data-passstep]:not([disabled])")?.focus(); return; }
     app.customPass = false;
     saveMine(def, { passPercent: v === "default" ? null : Number(v), wrongPenalty: app.mine.wrongPenalty });
   });
-  const savePass = () => saveMine(def, { passPercent: Number(document.getElementById("my-pass").value), wrongPenalty: app.mine.wrongPenalty });
-  const sp = document.getElementById("savepass");
-  if (sp) {
-    sp.onclick = savePass;
-    document.getElementById("my-pass").onkeydown = e => { if (e.key === "Enter") savePass(); };
-  }
-  screen.querySelectorAll("[data-pen]").forEach(b => b.onclick = () => saveMine(def, { passPercent: app.mine.passPercent, wrongPenalty: Number(b.dataset.pen) }));
-  screen.querySelectorAll("[data-voice]").forEach(b => b.onclick = () => {
-    try { storage.setItem(VOICE_KEY(p.id), b.dataset.voice); } catch (e) {}
-    render();
+  screen.querySelectorAll("[data-passstep]").forEach(b => b.onclick = () => {
+    app.customPass = true;
+    saveMine(def, { passPercent: snap5(snap5(percent) + Number(b.dataset.passstep)), wrongPenalty: app.mine.wrongPenalty });
   });
+  const more = screen.querySelector("[data-moreoff]");
+  more.onclick = () => { app.moreOff = !moreOff; render(); };
+  screen.querySelectorAll("[data-pen]").forEach(b => b.onclick = () => { app.moreOff = Number(b.dataset.pen) > 2; saveMine(def, { passPercent: app.mine.passPercent, wrongPenalty: Number(b.dataset.pen) }); });
+  screen.querySelectorAll("[data-voice]").forEach(b => b.onclick = () => saveVoice(b.dataset.voice === "on"));
   screen.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(p));
   screen.querySelectorAll("[data-download]").forEach(b => b.onclick = () => step(async () => {
     const value = { exportedAt: new Date().toISOString(), profile: p, ...(await backend.profileData(p.id)), quizSettings: await backend.childSettings(p.id) };
@@ -938,7 +1039,7 @@ function renderChildSettings() {
       await backend.deleteProfile(p.id);
       profiles = profiles.filter(x => x.id !== p.id);
       if (child && child.id === p.id) { child = null; data = null; sum = null; }
-      if (!profiles.length) { startOnboarding(); return; }
+      if (!profiles.length) { startOnboarding(); app.note = `${p.nickname}'s profile and progress are deleted.`; render(); return; }
       show({ mode: "grownups", note: `${p.nickname}'s profile and progress are deleted.` });
     });
     document.getElementById("nodelete").onclick = () => { app.confirmDelete = false; render(); };
@@ -953,16 +1054,15 @@ function dataSummary(exp, MAX) {
     <p class="small">Downloaded <b>nitya-${esc(exp.name)}.json</b>. Here is what it holds:</p>
     <ul class="points small"><li>Profile: ${esc(p.nickname)}, ${esc(className(p.classId))}, ${esc(boardName(p.board))}, ${esc(languageName(p.language))}, avatar ${esc(p.avatar)}</li>
       <li>${done.length} ${done.length === 1 ? "quiz" : "quizzes"} and ${v.responses.length} answers</li>
-      <li>Quiz settings: ${v.quizSettings.passPercent === null ? "class default pass mark" : `${v.quizSettings.passPercent}% to pass`}, ${v.quizSettings.wrongPenalty === null ? "class default marks off" : `${v.quizSettings.wrongPenalty} off for a wrong first try`}</li></ul>
-    ${done.length ? `<div class="log">${done.slice(-8).reverse().map(a => `<div><span>${esc(new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))}</span><span>${esc(topicTitle(a.topicId))}</span>
-      <span>${a.practice ? "Practice" : `${a.marks} / ${MAX}`}</span><span>${a.practice ? "" : a.cleared ? "Cleared" : "Not yet"}</span></div>`).join("")}</div>` : ""}
+      <li>Quiz settings: ${v.quizSettings.passPercent === null ? "class default pass mark" : `${v.quizSettings.passPercent}% to pass`}, ${v.quizSettings.wrongPenalty === null ? "class default marks off" : `${v.quizSettings.wrongPenalty} off for a wrong first try`}, voice ${v.quizSettings.voice === null ? "as the look decides" : v.quizSettings.voice ? "on" : "off"}</li></ul>
+    ${done.length ? `<ul class="qlog">${done.slice(-8).reverse().map(a => `<li>${esc(new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))} · ${a.practice ? `Practice: ${esc(topicTitle(a.topicId))}` : `${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}`}</li>`).join("")}</ul>` : ""}
     <details><summary>Show the raw file</summary><pre class="data">${esc(JSON.stringify(v, null, 2))}</pre></details>
     <div class="row"><button class="ghost quiet" type="button" onclick="window.print()">Print this</button></div>
   </div>`;
 }
 
 function saveMine(def, choice) {
-  const next = { ...choice, look: app.mine.look };
+  const next = { ...choice, look: app.mine.look, voice: app.mine.voice };
   // The default, chosen again, is kept as "the default", so it follows the admin's.
   if (next.passPercent === def.passPercent) next.passPercent = null;
   if (next.wrongPenalty === def.wrongPenalty) next.wrongPenalty = null;
@@ -973,7 +1073,7 @@ function saveMine(def, choice) {
     await backend.saveChildSettings(profileId, next);
     app.mine = next;
     if (child && child.id === profileId) settings.child = next;
-    if (next.passPercent === null || [50, 80].includes(next.passPercent)) app.customPass = false;
+    if (next.passPercent === null) app.customPass = false;
     app.note = next.passPercent === null && next.wrongPenalty === null ? `Saved. ${app.profile.nickname} uses the class default.` : "Saved.";
     app.error = null;
     app.lookNote = null;
@@ -982,6 +1082,22 @@ function saveMine(def, choice) {
 }
 
 const LOOK_NAMES = { play: "Playful", focus: "Clean" };
+
+/** Saves reading aloud for the child on this page, with their other settings, so it holds on every device. */
+function saveVoice(on) {
+  const p = app.profile;
+  // On is the playful look's own choice and off the clean look's, so choosing that again goes back to "as the look decides".
+  const byLook = M.lookFor(p.classId, app.mine.look) === "play";
+  const next = { ...app.mine, voice: on === byLook ? null : on };
+  step(async () => {
+    await backend.saveChildSettings(p.id, next);
+    app.mine = next;
+    if (child && child.id === p.id) settings.child = next;
+    app.voiceNote = `Saved. Voice and sounds are ${on ? "on" : "off"} for ${p.nickname}.`;
+    app.note = null; app.lookNote = null; app.error = null;
+    render();
+  });
+}
 
 /** Saves the look for the child on this page; null lets the class decide. */
 function saveLook(choice) {
@@ -1035,9 +1151,9 @@ function reviewCard(e) {
     <div class="row">
       ${M.canFixHere(q) ? `<button class="ghost tonal" type="button" data-fixq="${q.id}">${ICONS.edit}Fix</button>` : ""}
       <button class="ghost" type="button" data-decide="rejected" data-q="${q.id}">${confirming("rejected") ? "Tap again to reject" : "Reject"}</button>
-      <button class="ghost quiet" type="button" data-decide="approved" data-q="${q.id}">${confirming("approved") ? "Tap again to approve as it is" : "Approve anyway"}</button>
     </div>
     ${M.canFixHere(q) ? "" : `<p class="small muted">This came from a CSV, so fix it in the Drive file (${esc(q.sourceRef ?? "its row")}). The next sync checks it again.</p>`}
+    <div class="row approve-row"><button class="ghost quiet" type="button" data-decide="approved" data-q="${q.id}">${confirming("approved") ? "Tap again to approve as it is" : "Approve anyway"}</button></div>
   </div>`;
 }
 
@@ -1136,6 +1252,16 @@ function renderAdmin() {
   });
 }
 
+/** The Fix form's right answer: a tick box for each option, so it can't be something that isn't offered. */
+function answerPicks(e) {
+  const split = v => String(v ?? "").split("|").map(x => x.trim()).filter(Boolean);
+  const answers = split(e.answers);
+  const options = split(e.options);
+  return options.length
+    ? options.map((o, i) => `<label class="pick"><input type="checkbox" data-ans value="${esc(o)}" ${answers.includes(o) ? "checked" : ""}><span>${esc(o)}</span></label>`).join("")
+    : `<p class="small muted">Type the options first.</p>`;
+}
+
 /** The admin panel's messages sit at the top, and the card that was tapped may be gone. */
 function toTop() { try { window.scrollTo(0, 0); } catch (e) {} }
 
@@ -1157,7 +1283,7 @@ function renderFix() {
     <form id="fixform" novalidate>
       ${text("prompt", "Question")}
       ${text("options", "Options", 'Separate them with "|", like 6 | 7 | 8.')}
-      ${text("answers", "Right answer")}
+      <fieldset class="answerpick"><legend>Right answer</legend><div class="row" id="answerpick">${answerPicks(e)}</div></fieldset>
       <label for="f-level">Level</label><select id="f-level">${[1, 2, 3, 4].map(l => `<option value="${l}" ${String(l) === e.level ? "selected" : ""}>L${l} ${LEVEL_NAMES[l]}</option>`).join("")}</select>
       <label for="f-subSkill">Skill</label><select id="f-subSkill">${Object.entries(c.subSkillNames).map(([id, name]) => `<option value="${esc(id)}" ${id === e.subSkill ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
       ${text("hint", "Hint after a wrong first try")}
@@ -1174,7 +1300,8 @@ function renderFix() {
   </div>`;
   const read = () => {
     const out = {};
-    for (const f of ["prompt", "options", "answers", "hint", "explanation", "reason", "picture", "working"]) out[f] = document.getElementById(`f-${f}`).value;
+    for (const f of ["prompt", "options", "hint", "explanation", "reason", "picture", "working"]) out[f] = document.getElementById(`f-${f}`).value;
+    out.answers = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value).join(" | ");
     out.level = document.getElementById("f-level").value;
     out.subSkill = document.getElementById("f-subSkill").value;
     return out;
@@ -1191,8 +1318,13 @@ function renderFix() {
     }
     render();
   };
+  // The right answer is picked from the options, so it always is one of them.
+  document.getElementById("f-options").addEventListener("input", () => {
+    const picked = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value).join(" | ");
+    document.getElementById("answerpick").innerHTML = answerPicks({ options: document.getElementById("f-options").value, answers: picked });
+  });
   // Changing a field after a check means checking again before saving.
-  screen.querySelectorAll("#fixform input, #fixform select").forEach(i => i.oninput = () => {
+  screen.querySelector("#fixform").addEventListener("input", () => {
     if (!app.candidate) return;
     app.candidate = null;
     const save = document.getElementById("save");
@@ -1237,39 +1369,62 @@ function startQuiz(topicId, practiceSkill) {
   app = {
     mode: "quiz", topicId, practiceSkill, bank, practiceTotal: Math.min(PRACTICE_LENGTH, bank.length), playId: play.id,
     state: M.startQuiz({ classId: child.classId, topicId, attemptNo: attemptNoFor(topicId), seenBefore: sum.seen[topicId] || [], ...quizSettings() }),
-    phase: "ask", feedback: null, prevMarks: 0, delta: null, tries: [],
+    phase: "ask", feedback: null, prevMarks: 0, delta: null, tries: [], meter: 0, meterFrom: 0,
   };
   app.q = M.nextQuestion(app.state, app.bank);
   keepQuiz();
   render();
 }
 
+/** Carries on the topic's kept quiz if there is one, or starts a new one. */
+function playTopic(topicId, practiceSkill) {
+  const kept = keptQuiz(quizKey(topicId, practiceSkill));
+  if (kept) { app = { ...kept, mode: "quiz" }; render(); } else startQuiz(topicId, practiceSkill);
+}
+
+const quizKey = (topicId, practiceSkill) => practiceSkill ? `${topicId}|${practiceSkill}` : topicId;
+function keptQuizzes() {
+  try { const all = JSON.parse(storage.getItem(QUIZ_KEY(child.id)) || "null"); return all && typeof all === "object" && !all.state ? all : {}; } catch (e) { return {}; }
+}
+
 function keepQuiz() {
-  const keep = ["mode", "topicId", "practiceSkill", "bank", "practiceTotal", "playId", "state", "phase", "feedback", "fbText", "prevMarks", "delta", "q", "tries"];
-  try { storage.setItem(QUIZ_KEY(child.id), JSON.stringify(Object.fromEntries(keep.map(k => [k, app[k]])))); } catch (e) {}
+  const keep = ["mode", "topicId", "practiceSkill", "bank", "practiceTotal", "playId", "state", "phase", "feedback", "fbText", "prevMarks", "delta", "q", "tries", "picked", "meter", "meterFrom"];
+  const all = keptQuizzes();
+  all[quizKey(app.topicId, app.practiceSkill)] = Object.fromEntries(keep.map(k => [k, app[k]]));
+  try { storage.setItem(QUIZ_KEY(child.id), JSON.stringify(all)); } catch (e) {}
 }
 
-function keptQuiz() {
+/** The kept quiz for a topic (or practice skill), if it can still be carried on. */
+function keptQuiz(key) {
   if (!child) return null;
-  try {
-    const q = JSON.parse(storage.getItem(QUIZ_KEY(child.id)) || "null");
-    // A quiz on a topic that has since been cleared or locked, or one already finished, isn't offered again.
-    if (!q || !q.state || !sum.progress.topics[q.topicId] || sum.progress.topics[q.topicId].state === "locked") return null;
-    if (!data.attempts.some(a => a.id === q.playId && !a.finishedAt)) return null;
-    return q;
-  } catch (e) { return null; }
+  const q = keptQuizzes()[key];
+  // A quiz on a topic that has since been locked, or one already finished, isn't offered again.
+  if (!q || !q.state || !sum.progress.topics[q.topicId] || sum.progress.topics[q.topicId].state === "locked") return null;
+  if (!data.attempts.some(a => a.id === q.playId && !a.finishedAt)) return null;
+  return q;
 }
 
-function dropQuiz() { try { storage.setItem(QUIZ_KEY(child.id), "null"); } catch (e) {} }
+/** Where a kept quiz has got to, as the child sees it. */
+const keptAt = q => `Question ${q.phase === "ask" ? q.state.asked.length + 1 : q.state.asked.length} of ${q.practiceSkill ? q.practiceTotal : M.QUIZ_LENGTH}`;
+
+function dropQuiz(key) {
+  const all = keptQuizzes();
+  delete all[key];
+  try { storage.setItem(QUIZ_KEY(child.id), JSON.stringify(all)); } catch (e) {}
+}
 
 function nextQ() {
   app.prevMarks = app.state.marks;
+  // The playful meter catches up with any mark taken away here, on the new question, without going backwards in view.
+  app.meter = app.state.marks;
+  app.meterFrom = app.meter;
   app.delta = null;
   app.q = M.nextQuestion(app.state, app.bank);
   app.phase = "ask";
   app.feedback = null;
   app.fbText = "";
   app.tries = [];
+  app.picked = null;
   keepQuiz();
   render();
 }
@@ -1294,7 +1449,7 @@ function finish() {
   const s = app.state;
   const playId = app.playId, profileId = child.id;
   const play = data.attempts.find(a => a.id === playId);
-  dropQuiz();
+  dropQuiz(quizKey(app.topicId, app.practiceSkill));
   if (app.practiceSkill) {
     const result = { marks: s.marks, cleared: false, stars: 0, passMarks: s.passMarks, maxMarks: maxMarks(), correct: s.correct };
     Object.assign(play, { finishedAt: new Date().toISOString(), marks: result.marks, cleared: false, stars: 0 });
@@ -1326,51 +1481,61 @@ function renderDash() {
   const clearedCount = states.filter(s => s.state === "cleared").length;
   const totalStars = Object.values(sum.stars).reduce((a, b) => a + b, 0);
   const next = M.nextClass(child.classId);
-  const pass = quizSettings().passMarks, passPct = (pass / MAX) * 100;
-  const kept = keptQuiz();
+  const pass = quizSettings().passMarks;
   const upNext = topics.find(t => sum.progress.topics[t.id].state === "current");
+  const starText3 = n => `${"★".repeat(n)}${"☆".repeat(3 - n)}`;
 
   const rows = topics.map((t, i) => {
     const e = sum.progress.topics[t.id];
     const stars = sum.stars[t.id] || 0;
+    const kept = e.state === "locked" ? null : keptQuiz(t.id);
     const bestPct = Math.min(100, (e.bestScore / MAX) * 100);
     const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
-    const starsHtml = stars ? `<span class="stars-sm" role="img" aria-label="${stars} of 3 stars"><span aria-hidden="true">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</span></span>` : "";
-    // Playful shows a young child only the stars; clean shows the best marks and tries as well.
-    const score = e.attempts
-      ? play ? starsHtml || `<span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>` : `<span>Best ${e.bestScore} / ${MAX} · ${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>${starsHtml}`
-      : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
-    const act = e.state === "current"
-      ? `<button class="chipbtn" type="button" data-open="${t.id}">${e.attempts ? word("retry") : "Start"}</button>`
-      : e.state === "cleared" ? `<button class="chipbtn soft" type="button" data-open="${t.id}">Practise</button>` : "";
-    // The clean look's ring fills with the best score so far.
+    const starsHtml = stars ? `<span class="stars-sm" role="img" aria-label="${stars} of 3 stars"><span aria-hidden="true">${starText3(stars)}</span></span>` : "";
+    // What the button does: carry on a kept quiz, start or retry the topic, or play a cleared one again straight away.
+    const verb = kept ? "Carry on" : e.state === "cleared" ? word("again") : e.attempts ? word("retry") : "Start";
     const ring = e.state === "cleared" ? 100 : Math.round(bestPct);
-    const node = `<span class="num" style="--p:${ring}" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>`;
-    // Clean keeps a long syllabus short: cleared and locked topics are one-line rows, only the next topic is a card.
-    if (!play && e.state !== "current") {
-      return `<div class="topic ${e.state} slim">${node}
-        <div class="tmain"><h3>${esc(t.title)}</h3><div class="tmeta">${score}</div></div>
-        ${e.state === "cleared" ? `<button class="ghost quiet" type="button" data-open="${t.id}" aria-label="Practise ${esc(t.title)}">Practise${ICONS.chev}</button>` : ""}</div>`;
+    const glyph = e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1;
+    if (!play) {
+      // Clean: every topic is one row; open ones are a single button, so a long syllabus stays short.
+      const meta = kept ? keptAt(kept) : e.attempts ? `${e.bestScore}/${MAX}${stars ? ` · ${starText3(stars)}` : ""}` : e.state === "locked" ? `Opens after topic ${i}` : "Not started";
+      const node = `<span class="num" style="--p:${ring}" aria-hidden="true">${glyph}</span>`;
+      const body = `${node}<span class="tmain"><span class="ttl">${esc(t.title)}</span><span class="tmeta">${e.state === "current" ? `<span class="chip current">Up next</span>` : ""}${esc(meta)}</span></span>`;
+      if (e.state === "locked") return `<div class="topic locked slim">${body}</div>`;
+      const label = `${verb} ${t.title}. ${kept ? keptAt(kept) : e.attempts ? `Best ${e.bestScore} of ${MAX}${stars ? `, ${starText(stars)}` : ""}` : "Not started"}.`;
+      return `<button class="topic ${e.state} slim rowbtn" type="button" data-play="${t.id}" aria-label="${esc(label)}">${body}${ICONS.chev}</button>`;
     }
+    // Playful: the trail. Each stop's round node reads its name and state aloud.
+    const said = e.state === "cleared" ? `${t.title}. Done! ${starText(stars)}.` : e.state === "current" ? `${t.title}. Up next! Tap ${verb}.` : `${t.title}. Locked. Finish the topics before it first.`;
+    const node = `<button class="num" type="button" style="--p:${ring}" data-say="${esc(said)}" aria-label="Listen: ${esc(t.title)}">${glyph}<span class="nodesay" aria-hidden="true">${SPEAKER}</span></button>`;
+    const score = kept ? `<span>${keptAt(kept)}</span>` : e.attempts ? starsHtml || `<span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>` : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
+    const act = e.state === "locked" ? "" : `<button class="chipbtn ${e.state === "cleared" && !kept ? "soft" : ""}" type="button" data-play="${t.id}">${verb}</button>`;
     return `<div class="topic ${e.state}">${node}
       <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
       <div class="act">${act}</div></div>`;
-  }).join("");
+  });
 
   const areas = weakAreas(sum);
   const weakest = areas.find(a => sum.progress.topics[a.tid].state !== "locked");
   const cls = className(child.classId);
-  const carry = kept ? `<div class="carry block" role="region" aria-label="Carry on">
-      <div><span class="label">Carry on</span><b>${esc(byId(kept.topicId).topic.title)}</b>
-        <span class="small muted">Question ${kept.phase === "ask" ? kept.state.asked.length + 1 : kept.state.asked.length} of ${kept.practiceSkill ? kept.practiceTotal : M.QUIZ_LENGTH}</span></div>
-      <button class="btn primary" type="button" id="carry">Carry on</button></div>` : "";
+  // The owl's practice card sits on the trail, just under the "Up next" stop, where a child looks next.
+  if (play && weakest) {
+    const skill = (byId(weakest.tid).subSkillNames[weakest.skill] || weakest.skill).toLowerCase();
+    const keptP = keptQuiz(quizKey(weakest.tid, weakest.skill));
+    const card = `<div class="trail-extra"><div class="mascot">${owl("think")}<div class="bubble"><h2>Let's practise ${esc(skill)}!</h2>${sayBtn(`Let's practise ${skill}!`)}
+      <div class="row"><button class="btn primary" type="button" data-practice="${weakest.tid}|${weakest.skill}">${keptP ? "Carry on" : "Play"}</button></div></div></div></div>`;
+    const at = upNext ? topics.indexOf(upNext) + 1 : rows.length;
+    rows.splice(at, 0, card);
+  }
+  // Clean keeps one "Continue" at the top, so the next step is in view however long the list.
+  const keptNext = upNext ? keptQuiz(upNext.id) : null;
+  const cont = !play && upNext ? `<div class="row"><button class="btn primary wide" type="button" data-play="${upNext.id}">${keptNext ? `Carry on: ${esc(upNext.title)}<small>${keptAt(keptNext)}</small>` : `Continue: ${esc(upNext.title)}`}</button></div>` : "";
   screen.innerHTML = `
     <div class="row" style="justify-content:space-between">
       <div class="who"><span class="emoji" aria-hidden="true">${M.avatarEmoji(child.avatar)}</span><b>${esc(child.nickname)}</b></div>
       <div class="row"><button class="ghost" type="button" id="switch">Switch child</button>
         <button class="ghost" type="button" id="grownups">${ICONS.lock}Grown-ups</button></div></div>
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
-    ${carry}
     <section class="block">
       <div class="dash-head">
         <div style="display:grid;gap:4px"><span class="label">${play ? "My maths" : "Class dashboard"}</span><h1>${esc(cls)} Maths</h1></div>
@@ -1383,29 +1548,32 @@ function renderDash() {
         <div class="segs" style="--n:${topics.length}" role="img" aria-label="${clearedCount} of ${topics.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
         ${play ? (sum.promoted ? `<p class="small muted">${esc(cls)} complete!</p>` : "")
           : `<p class="small muted">${sum.promoted ? `${esc(cls)} complete!${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}` : `Clear every topic to move up${next ? ` to ${esc(className(next))}` : ""}. Each quiz needs ${passPercent()}% (${pass} of ${MAX} marks).`}</p>`}
-        ${!play && upNext && !kept ? `<div class="row"><button class="btn primary" type="button" data-open="${upNext.id}">Continue: ${esc(upNext.title)}</button></div>` : ""}
+        ${cont}
       </div>
     </section>
-    <div class="topics">${rows}</div>
-    ${play
-      ? weakest ? `<div class="mascot">${owl("think")}<div class="bubble"><h2>Let's practise ${esc(byId(weakest.tid).subSkillNames[weakest.skill] || weakest.skill).toLowerCase()}!</h2>
-          <div class="row"><button class="btn primary" type="button" data-practice="${weakest.tid}|${weakest.skill}">Play</button></div></div></div>` : ""
-      : `<div class="panels">
+    <div class="topics">${rows.join("")}</div>
+    ${play ? "" : `<div class="panels">
       <div class="panel"><span class="label">Improvement areas</span>${areas.length ? areas.map(a => {
         const c = byId(a.tid);
         const open = sum.progress.topics[a.tid].state !== "locked";
         return `<div class="area"><div><b>${esc(c.subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(c.topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
-          ${open ? `<button class="ghost" type="button" data-practice="${a.tid}|${a.skill}">Practise</button>` : ""}
+          ${open ? `<button class="ghost" type="button" data-practice="${a.tid}|${a.skill}">${keptQuiz(quizKey(a.tid, a.skill)) ? "Carry on" : "Practise"}</button>` : ""}
           <span class="mini" aria-hidden="true"><b style="width:${a.acc * 100}%"></b></span></div>`;
       }).join("") : `<p class="muted small">Nothing to work on yet. After each quiz, skills under 80% show up here with a practice button.</p>`}</div>
       <div class="panel"><span class="label">Right first time, by level</span>${levelRows(sum)}</div>
     </div>`}`;
-  screen.querySelectorAll("[data-open]").forEach(b => b.onclick = () => openTopic(b.dataset.open));
-  screen.querySelectorAll("[data-practice]").forEach(b => b.onclick = () => { const [t, s] = b.dataset.practice.split("|"); startQuiz(t, s); });
-  const c = document.getElementById("carry");
-  if (c) c.onclick = () => { app = { ...kept, mode: "quiz" }; render(); };
+  // A topic not started yet opens its lesson first; one already played goes straight to the quiz (the lesson is a tap away there).
+  screen.querySelectorAll("[data-play]").forEach(b => b.onclick = () => {
+    const id = b.dataset.play, e = sum.progress.topics[id];
+    if (keptQuiz(id) || e.attempts) playTopic(id); else openTopic(id);
+  });
+  screen.querySelectorAll("[data-practice]").forEach(b => b.onclick = () => { const [t, s] = b.dataset.practice.split("|"); playTopic(t, s); });
   document.getElementById("switch").onclick = () => askPin("To switch to another child.", () => show({ mode: "profiles" }));
   document.getElementById("grownups").onclick = () => askPin("To open the grown-ups' page.", () => show({ mode: "grownups" }));
+  if (play && upNext) {
+    const k = keptQuiz(upNext.id);
+    autoSay(`dash${upNext.id}${k ? "k" : ""}`, k ? `Carry on with ${upNext.title}!` : `Up next: ${upNext.title}!`);
+  }
 }
 
 function lockIcon() {
@@ -1445,12 +1613,17 @@ function renderLesson() {
     const picks = app.tryPicks ?? [];
     const got = picks.includes(t.answer);
     const wrong = picks.filter(x => x !== t.answer);
+    // A quiz already under way on this topic is carried on, not thrown away: the child chooses, with Carry on first.
+    const kept = !app.peek && got ? keptQuiz(app.topicId) : null;
+    const goRow = !got ? "" : kept
+      ? `<button class="btn primary" type="button" id="go">Carry on from question ${kept.phase === "ask" ? kept.state.asked.length + 1 : kept.state.asked.length}</button><button class="ghost" type="button" id="fresh">Start again</button>`
+      : `<button class="btn primary" type="button" id="go">${app.peek ? "Back to my question" : "Start the quiz"}</button>`;
     screen.innerHTML = `${crumbs}
       <div class="mascot">${MASCOT}<div class="bubble"><span class="label">Try it</span><p class="prompt" tabindex="-1">${promptHtml(t.prompt)}</p>${sayBtn(t.prompt)}</div></div>
       ${dotsSvg(t.visual)}
-      ${optionButtons(t.options, "data-try", { disabled: got, tried: wrong, right: got ? [t.answer] : null })}
+      ${optionButtons(t.options, "data-try", { disabled: got, tried: wrong, right: got ? [t.answer] : null, picked: got ? t.answer : null })}
       <div id="tryfb">${got ? feedbackCard("good", "You got it!", esc(t.praise)) : wrong.length ? feedbackCard("gentle", "Let's look again.", `${esc(t.help)} Try again!`) : ""}</div>
-      <div class="row">${got ? `<button class="btn primary" type="button" id="go">${app.peek ? "Back to my question" : "Start the quiz"}</button>` : ""}
+      <div class="row actions">${goRow}
         <button class="ghost" type="button" id="back">Back</button></div>`;
     autoSay(`try${app.topicId}`, t.prompt);
     document.getElementById("back").onclick = () => { app.page--; app.tryPicks = []; render(); };
@@ -1465,7 +1638,9 @@ function renderLesson() {
       afterAnswer(ok ? document.getElementById("go") : screen.querySelector("[data-try]:not([disabled])"));
     });
     const go = document.getElementById("go");
-    if (go) go.onclick = () => app.peek ? backToQuiz() : startQuiz(app.topicId);
+    if (go) go.onclick = () => app.peek ? backToQuiz() : playTopic(app.topicId);
+    const fresh = document.getElementById("fresh");
+    if (fresh) fresh.onclick = () => { dropQuiz(app.topicId); startQuiz(app.topicId); };
   }
   const td = document.getElementById("todash");
   if (td) td.onclick = goDash;
@@ -1493,28 +1668,41 @@ function afterAnswer(target) {
 
 function backToQuiz() { app = app.saved; app.prevMarks = app.state.marks; render(); }
 
+/** Playful: one goal bar that fills up to the flag at its end, so reaching the flag means a full bar. */
+function goalMeter(marks, pass, { from = marks, id = "", total = 0, done = 0 } = {}) {
+  const pct = v => (Math.min(v, pass) / pass) * 100;
+  const reached = marks >= pass;
+  const dots = total ? `<div class="qdots" aria-hidden="true">${Array.from({ length: total }, (_, i) => `<span class="${i < done ? "done" : i === done ? "now" : ""}"></span>`).join("")}</div>` : "";
+  return `<div class="marks meter goal">
+    <div class="track" role="progressbar" aria-label="On the way to the flag" aria-valuemin="0" aria-valuemax="${pass}" aria-valuenow="${Math.min(marks, pass)}">
+      <div class="fill ${reached ? "qualified" : ""}" ${id ? `id="${id}" data-to="${pct(marks)}"` : ""} style="width:${pct(from)}%"></div>
+      <span class="goalflag ${reached ? "crossed" : ""} ${reached && from < pass ? "burst" : ""}">${FLAG}</span></div>${dots}</div>`;
+}
+
 function marksBar() {
   const s = app.state;
   const MAX = maxMarks();
   const PASS = s.passMarks;
+  if (look() === "play") {
+    // A wrong first try never moves the bar back: the meter only grows while a question is open, and catches up on the next one.
+    const done = s.asked.length - (app.phase === "retry" ? 1 : 0);
+    return goalMeter(app.meter ?? s.marks, PASS, { from: app.meterFrom ?? app.meter ?? s.marks, id: "fill", total: M.QUIZ_LENGTH, done });
+  }
   const passPct = (PASS / MAX) * 100;
   const q = s.marks >= PASS;
   const d = app.delta;
-  const track = `<div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${MAX}" aria-valuenow="${s.marks}" aria-label="Marks: ${s.marks}, ${PASS} to pass">
-      <div class="fill ${q ? "qualified" : ""}" id="fill" style="width:${(Math.min(app.prevMarks, MAX) / MAX) * 100}%"></div>
-      <div class="passmark ${q ? "crossed" : ""}" style="left:${passPct}%"><span>${look() === "play" ? FLAG : `${q ? "✓ " : ""}Pass ${PASS}`}</span></div>
-    </div>`;
-  // Playful: a bar that fills towards a flag, with no numbers, rules or penalties for a young child to read.
-  if (look() === "play") return `<div class="marks meter">${track}</div>`;
   const deltaHtml = d === null || d === undefined ? "" : d > 0 ? `<span class="delta up">+${d}</span>` : d < 0 ? `<span class="delta down">−${-d}</span>` : "";
   return `<div class="marks">
     <div class="marks-top">
       <div class="row" style="gap:8px"><span class="label">Marks</span><span class="marks-num">${s.marks}</span>${deltaHtml}</div>
       <span class="qual ${q ? "yes" : ""}">${q ? "Pass mark crossed!" : `${PASS - s.marks} more to pass`}</span>
+      <details class="howmarks"><summary><span class="hm-long">How marks work</span><span class="hm-short" aria-hidden="true">How?</span></summary>
+        <p class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away ${s.wrongPenalty}; the second try is for practice.</p></details>
     </div>
-    ${track}
-    <details class="howmarks"><summary>How marks work</summary>
-      <p class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away ${s.wrongPenalty}; the second try is for practice.</p></details>
+    <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${MAX}" aria-valuenow="${s.marks}" aria-label="Marks: ${s.marks}, ${PASS} to pass">
+      <div class="fill ${q ? "qualified" : ""}" id="fill" data-to="${(Math.min(s.marks, MAX) / MAX) * 100}" style="width:${(Math.min(app.prevMarks, MAX) / MAX) * 100}%"></div>
+      <div class="passmark ${q ? "crossed" : ""}" style="left:${passPct}%"><span>${q ? "✓ " : ""}Pass ${PASS}</span></div>
+    </div>
   </div>`;
 }
 
@@ -1526,6 +1714,7 @@ function renderQuiz() {
   const locked = app.phase === "done";
   const c = byId(app.topicId);
   const done = s.asked.length - (app.phase === "retry" ? 1 : 0);
+  const play = look() === "play";
   const tag = practice ? `<span class="lvl practice">Practice · no marks</span>` : `<span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span>`;
   screen.innerHTML = `
     <div class="qtop">
@@ -1534,13 +1723,13 @@ function renderQuiz() {
       <button class="ghost iconbtn" type="button" id="relesson" aria-label="See the lesson">${ICONS.book}<span class="lbl">Lesson</span></button>
       <button class="ghost iconbtn" type="button" id="stopq" aria-label="Stop the quiz">${ICONS.close}<span class="lbl">Stop</span></button></div>
     ${app.confirmStop ? stopCard("Stop now?", `You can carry on later from question ${qNo}.`, "Stop") : ""}
-    <div class="qprog" role="progressbar" aria-label="Questions done" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">${
-      Array.from({ length: total }, (_, i) => `<span class="${i < done ? "done" : i === done ? "now" : ""}"></span>`).join("")}</div>
+    ${play && !practice ? "" : `<div class="qprog" role="progressbar" aria-label="Questions done" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">${
+      Array.from({ length: total }, (_, i) => `<span class="${i < done ? "done" : i === done ? "now" : ""}"></span>`).join("")}</div>`}
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
     ${practice ? "" : marksBar()}
     <div class="mascot">${MASCOT}<div class="bubble">${tag}<p class="prompt" tabindex="-1">${promptHtml(q.prompt)}</p>${sayBtn(app.fbText ? `${q.prompt} ${app.fbText}` : q.prompt)}</div></div>
     ${dotsSvg(q.visual)}
-    ${optionButtons(q.options, "data-opt", { disabled: locked, tried: app.tries ?? [], right: locked ? q.answers : null })}
+    ${optionButtons(q.options, "data-opt", { disabled: locked, tried: app.tries ?? [], right: locked ? q.answers : null, picked: app.picked })}
     ${locked ? "" : keyHint(q.options.length)}
     <div id="fb">${app.feedback ?? ""}</div>
     ${locked ? `<div class="row"><button class="btn primary wide" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button></div>` : ""}`;
@@ -1555,11 +1744,11 @@ function renderQuiz() {
     if (e.key.length === 1 && b && !b.disabled) b.click();
   };
   const fill = document.getElementById("fill");
-  if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = (Math.min(s.marks, maxMarks()) / maxMarks()) * 100 + "%"; }));
+  if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = fill.dataset.to + "%"; }));
 
   document.getElementById("relesson").onclick = () => { const saved = app; app = { mode: "lesson", topicId: saved.topicId, page: 0, peek: true, saved }; render(); };
   document.getElementById("stopq").onclick = () => { app.confirmStop = true; render(); document.getElementById("keepon")?.focus(); };
-  wireStopCard(() => { keepQuiz(); goDash(); });
+  wireStopCard(() => { keepQuiz(); goDash(); }, "stopq");
   const cont = document.getElementById("cont");
   if (cont) cont.onclick = () => (quizDone() ? finish() : nextQ());
   screen.querySelectorAll("[data-opt]:not([disabled])").forEach(b => b.onclick = () => answer(b.dataset.opt));
@@ -1570,12 +1759,14 @@ function answer(choice) {
   let ok = false;
   app.prevMarks = app.state.marks;
   app.confirmStop = false;
+  const meterBefore = app.meter ?? app.state.marks;
   if (app.phase === "ask") {
     const r = M.answerFirstTry(app.state, q, choice);
     app.state = r.state;
     app.delta = r.result.marksDelta;
     ok = r.result.kind === "praise";
     if (ok) {
+      app.picked = choice;
       saveResponse(q);
       app.phase = "done";
       const title = pick(["Super!", "Well done!", "Brilliant!", "Yes!"]);
@@ -1597,12 +1788,16 @@ function answer(choice) {
     saveResponse(q);
     app.phase = "done";
     ok = r.retryCorrect;
-    if (!r.retryCorrect) app.tries = [...(app.tries ?? []), choice];
+    if (r.retryCorrect) app.picked = choice;
+    else app.tries = [...(app.tries ?? []), choice];
     app.feedback = r.retryCorrect
       ? feedbackCard("good", "You worked it out!", esc(r.explanation))
       : feedbackCard("gentle", "Let's do it together.", `${esc(r.explanation)} The answer is <b>${esc(r.answer)}</b>.`);
     app.fbText = r.retryCorrect ? `You worked it out! ${r.explanation}` : `Let's do it together. ${r.explanation} The answer is ${r.answer}.`;
   }
+  // The playful meter grows with a right answer and never shrinks in view.
+  app.meterFrom = meterBefore;
+  app.meter = Math.max(meterBefore, app.state.marks);
   keepQuiz();
   chime(ok ? "good" : "gentle");
   render();
@@ -1618,24 +1813,30 @@ function renderResult() {
   const play = look() === "play";
   const passPct = (o.passMarks / MAX) * 100;
   const bar = `<div class="marks"><div class="marks-top"><div><span class="label">Final marks</span><div class="marks-num">${o.marks} / ${MAX}</div></div>
-      <span class="qual ${o.cleared ? "yes" : ""}">${o.cleared ? "Above the pass mark" : `${o.passMarks - o.marks} short of the pass mark`}</span></div>
+      <span class="${o.cleared ? "qual yes" : "small muted"}">${o.cleared ? "Above the pass mark" : `Pass mark ${o.passMarks}`}</span></div>
     <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>${play ? FLAG : `Pass ${o.passMarks}`}</span></div></div>
     <div class="small muted">${o.correct} of ${M.QUIZ_LENGTH} right first time</div></div>`;
-  // Playful: the bar and the flag, without numbers a young child can't read yet. Grown-ups see the marks on the Progress page.
-  const shownBar = play ? `<div class="marks meter"><div class="track" role="img" aria-label="${o.cleared ? "Past the flag" : "Not yet at the flag"}"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div>
-      <div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>${FLAG}</span></div></div></div>` : bar;
+  // Playful: the goal bar and the flag, without numbers a young child can't read yet. Grown-ups see the marks on the Progress page.
+  const shownBar = play ? goalMeter(o.marks, o.passMarks) : bar;
   const nextStar = !play && o.cleared && o.stars < 3 ? `<p class="small muted center">Next star at ${o.stars === 1 ? M.TWO_STARS : M.THREE_STARS} marks.</p>` : "";
 
   if (o.cleared && effect.kind === "promoted") {
     const next = effect.to ? className(effect.to) : null;
-    screen.innerHTML = `
-      <div class="cert">${owl("happy")}<span class="label">Certificate</span><h1 tabindex="-1">${esc(cls)} Maths complete!</h1>
-        <p>${esc(child.nickname)} cleared all ${topicList().length} topics.${next ? ` Ready for ${esc(next)}!` : ""}</p>
+    const total = Object.values(sum.stars).reduce((a, b) => a + b, 0);
+    // Playful: plain words for a 5-year-old and the stars earned; what opens next is for grown-ups, on the Progress page.
+    screen.innerHTML = play ? `
+      <div class="cert">${owl("happy")}<span class="label">Certificate</span><h1 tabindex="-1">You finished ${esc(cls)} Maths!</h1>
+        <p>${esc(child.nickname)} cleared all ${topicList().length} topics.</p>
+        ${starsHtml(o.stars)}
+        <p class="bigstat"><span class="starglyph" aria-hidden="true">★</span> ${total} stars in all</p></div>
+      <div class="row actions"><button class="btn primary" type="button" id="dash">Back to my map</button></div>` : `
+      <div class="cert"><span class="label">Certificate</span><h1 tabindex="-1">${esc(cls)} Maths complete!</h1>
+        <p>${esc(child.nickname)} cleared all ${topicList().length} topics.${next ? ` Ready for ${esc(next)}.` : ""}</p>
         ${starsHtml(o.stars)}
         ${next ? `<p class="small muted">${esc(next)} opens when its topics are ready.</p>` : ""}</div>
       ${shownBar}
-      <div class="row actions"><button class="btn primary" type="button" id="dash">See my ${esc(cls)} dashboard</button></div>`;
-    autoSay(`result${app.topicId}`, `${cls} Maths complete!`);
+      <div class="row actions"><button class="btn primary" type="button" id="dash">${word("map")}</button></div>`;
+    autoSay(`result${app.topicId}`, play ? `You finished ${cls} Maths! ${total} stars in all.` : `${cls} Maths complete!`);
   } else if (o.cleared) {
     const next = byId(effect.topicId);
     screen.innerHTML = `
@@ -1654,19 +1855,20 @@ function renderResult() {
     const practise = o.offerPractice && weak;
     const close = o.marks >= o.passMarks * 0.75;
     const title = close ? "So close!" : practise ? "Good effort! Let's practise first." : "Good effort! Let's have another go.";
-    const body = play ? `You got ${o.correct} right first time.` : `You got ${o.correct} of ${M.QUIZ_LENGTH} right first time. You need ${o.passMarks} marks to open the next topic, and harder questions give more marks.`;
+    // A young child isn't told "0 right": under 5, the owl praises the effort instead.
+    const body = play ? (o.correct < 5 ? "You tried every question!" : `You got ${o.correct} right first time.`) : `You got ${o.correct} of ${M.QUIZ_LENGTH} right first time. You need ${o.passMarks} marks to open the next topic, and harder questions give more marks.`;
     screen.innerHTML = `
       <div class="mascot">${owl("think")}<div class="bubble"><h2 tabindex="-1">${title}</h2><p>${body}</p></div></div>
       ${shownBar}
       <div class="row actions">
-        ${practise ? `<button class="btn primary" type="button" id="practice">Practise ${esc((c.subSkillNames[weak] || weak).toLowerCase())}</button>` : ""}
+        ${practise ? `<button class="btn primary" type="button" id="practice">${keptQuiz(quizKey(app.topicId, weak)) ? "Carry on practising" : "Practise"} ${esc((c.subSkillNames[weak] || weak).toLowerCase())}</button>` : ""}
         <button class="${practise ? "ghost" : "btn primary"}" type="button" id="lesson">Watch the lesson again</button>
         <button class="ghost" type="button" id="again">Try with new questions</button>
         <button class="ghost" type="button" id="dash">${word("map")}</button>
       </div>`;
     document.getElementById("lesson").onclick = () => openTopic(app.topicId);
     const pr = document.getElementById("practice");
-    if (pr) pr.onclick = () => startQuiz(app.topicId, weak);
+    if (pr) pr.onclick = () => playTopic(app.topicId, weak);
     autoSay(`result${app.topicId}`, `${title} ${body}`);
   }
   const again = document.getElementById("again");
@@ -1682,7 +1884,7 @@ function starsHtml(n) {
 function renderPracticeDone() {
   const c = byId(app.topicId);
   screen.innerHTML = `
-    <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">Practice done!</h2><p>You got ${app.correct} of ${app.total} on ${esc(c.subSkillNames[app.skill])}. Practice does not change your marks.</p></div></div>
+    <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">Practice done!</h2><p>You got ${app.correct} of ${app.total} on ${esc(c.subSkillNames[app.skill].toLowerCase())}.${look() === "play" ? "" : " Practice does not change your marks."}</p></div></div>
     <div class="row actions"><button class="btn primary" type="button" id="quiz">Try the quiz again</button><button class="ghost" type="button" id="dash">${word("map")}</button></div>`;
   autoSay(`practice${app.topicId}`, `Practice done! You got ${app.correct} of ${app.total}.`);
   document.getElementById("quiz").onclick = () => startQuiz(app.topicId);
@@ -1747,23 +1949,32 @@ const SCREENS = {
   signin: renderSignin, "email-sent": renderEmailSent, consent: renderConsent, notice: renderNotice, "set-pin": renderSetPin, pin: renderPin, "forgot-pin": renderForgotPin,
   profiles: renderProfiles, onboard: renderOnboard, "placement-offer": renderPlacementOffer, placement: renderPlacement,
   "placement-result": renderPlacementResult, grownups: renderGrownups, "child-settings": renderChildSettings,
-  admin: renderAdmin, fix: renderFix, "child-progress": renderChildProgress,
+  admin: renderAdmin, fix: renderFix, "child-progress": renderChildProgress, "delete-account": renderDeleteAccount,
   dash: renderDash, lesson: renderLesson, quiz: renderQuiz, result: renderResult, "practice-done": renderPracticeDone,
 };
 
 /* ---------- the two looks ---------- */
 // A child's own screens float on the page in the child's look; grown-up screens use the clean look.
-const KID_SCREENS = ["placement-offer", "placement", "placement-result", "dash", "lesson", "quiz", "result", "practice-done"];
+const KID_SCREENS = ["placement", "dash", "lesson", "quiz", "result", "practice-done"];
 const PLAYING = ["dash", "lesson", "quiz", "result", "practice-done"];
 
 function look() {
   if (PLAYING.includes(app.mode) && child) return M.lookFor(child.classId, settings.child?.look);
-  if (app.mode.startsWith("placement") && app.draft?.classId) return M.classLook(app.draft.classId);
+  if (app.mode === "placement" && app.draft?.classId) return M.classLook(app.draft.classId);
   return "focus";
+}
+
+/** A way to find the focused control again after the screen is rebuilt: its id, or its first data- attribute. */
+function focusKey(el) {
+  if (!el || !screen.contains(el) || el === screen) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const a = [...el.attributes].find(x => x.name.startsWith("data-"));
+  return a ? `[${a.name}="${CSS.escape(a.value)}"]` : null;
 }
 
 function render() {
   if (!["pin", "set-pin"].includes(app.mode)) document.onkeydown = null;
+  const had = focusKey(document.activeElement);
   const kid = KID_SCREENS.includes(app.mode);
   document.documentElement.dataset.look = look();
   document.documentElement.dataset.screen = kid ? "kid" : "grown";
@@ -1784,31 +1995,55 @@ function render() {
       const head = screen.querySelector(".prompt[tabindex], h1, h2[tabindex], h2");
       if (head) { if (!head.hasAttribute("tabindex")) head.setAttribute("tabindex", "-1"); head.focus({ preventScroll: true }); }
     }
+  } else if (had && !screen.contains(document.activeElement)) {
+    // The same screen, rebuilt: keep focus on the control that had it, or on the heading if it's gone.
+    const el = screen.querySelector(had);
+    const to = el && !el.disabled ? el : screen.querySelector(".prompt[tabindex], h1, h2");
+    if (to) { if (!to.matches("button, input, select, textarea, a, summary, [tabindex]")) to.setAttribute("tabindex", "-1"); to.focus({ preventScroll: true }); }
   }
 }
 let lastView = "", lastViewMode = "";
 
 /* ---------- the back button ---------- */
-// Each new screen adds a history entry, so Android's back gesture steps back inside Nitya instead of leaving it.
-let historyMode = null;
+// One extra history entry stands in for Nitya's own back step, so Android's back gesture goes back inside Nitya.
+// On a screen with nowhere further back (the map, sign-in, choosing a child), the first press says so and the
+// next one leaves, as Android apps do.
+let guarded = false;
 function trackHistory() {
-  if (app.mode === historyMode) return;
-  historyMode = app.mode;
-  try { history.pushState({ nitya: app.mode }, ""); } catch (e) {}
+  if (guarded) return;
+  guarded = true;
+  try { history.pushState({ nitya: true }, ""); } catch (e) {}
+}
+let toastTimer = null;
+function toast(text) {
+  const t = document.getElementById("toast");
+  if (!t) return;
+  t.textContent = text;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2000);
+}
+/** Nitya's own back step for the screen showing, or false where there is nowhere further back. */
+function goBack() {
+  const m = app.mode;
+  if (m === "quiz" || m === "placement") { app.confirmStop = true; render(); document.getElementById("keepon")?.focus(); return true; }
+  if (m === "lesson") { app.peek ? backToQuiz() : goDash(); return true; }
+  if (["result", "practice-done"].includes(m)) { goDash(); return true; }
+  if (m === "pin" && app.cancel) { app.cancel(); return true; }
+  if (["child-settings", "child-progress", "admin", "delete-account"].includes(m)) { m === "delete-account" ? show(app.back) : show({ mode: "grownups" }); return true; }
+  if (m === "fix") { openAdmin("queue"); return true; }
+  if (m === "notice" || m === "forgot-pin") { show(app.back && app.back.mode !== m ? app.back : { mode: "signin" }); return true; }
+  if (m === "email-sent") { document.getElementById("back")?.click(); return true; }
+  if (m === "onboard") { const b = document.getElementById("obback"); if (b && !b.hidden) { b.click(); return true; } return false; }
+  if (m === "placement-offer" || m === "placement-result") { show({ mode: "onboard", step: ONBOARD_STEPS.length - 1, draft: app.draft, editing: null, back: { mode: "profiles" } }); return true; }
+  if (m === "grownups") { child ? goDash() : show({ mode: "profiles" }); return true; }
+  if (m === "set-pin" && app.cancel) { app.cancel(); return true; }
+  return false;
 }
 window.addEventListener("popstate", () => {
-  historyMode = null;   // the screen we land on pushes a fresh entry, so back keeps working
-  const m = app.mode;
-  if (m === "quiz" || m === "placement") { app.confirmStop = true; return render(); }
-  if (m === "lesson") return app.peek ? backToQuiz() : goDash();
-  if (["result", "practice-done"].includes(m)) return goDash();
-  if (m === "pin" && app.cancel) return app.cancel();
-  if (["child-settings", "child-progress", "admin"].includes(m)) return show({ mode: "grownups" });
-  if (m === "fix") return openAdmin("queue");
-  if (m === "notice" || m === "forgot-pin") return show(app.back && app.back.mode !== m ? app.back : { mode: "signin" });
-  if (m === "onboard") { const b = document.getElementById("obback"); if (b && !b.hidden) return b.click(); }
-  if (m === "grownups" && child) return goDash();
-  render();
+  guarded = false;
+  if (goBack()) trackHistory();
+  else toast("Press back again to leave Nitya.");
 });
 
 boot();

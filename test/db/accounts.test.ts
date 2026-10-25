@@ -17,11 +17,14 @@ let db: pg.Client;
 let drop: () => Promise<void>;
 let api: Awaited<ReturnType<typeof startPostgrest>>;
 
-/** Sign-in is Supabase Auth's job; here a parent is simply signed in as a known user. */
-const signedInAs = (id: string, email: string): AuthPort => ({
-  user: async () => ({ id, email }),
-  signInWithGoogle: async () => {}, sendEmailLink: async () => {}, signOut: async () => {},
-});
+/** Sign-in is Supabase Auth's job; here a parent is simply signed in as a known user, until they sign out. */
+const signedInAs = (id: string, email: string): AuthPort => {
+  let out = false;
+  return {
+    user: async () => (out ? null : { id, email }),
+    signInWithGoogle: async () => {}, sendEmailLink: async () => {}, signOut: async () => { out = true; },
+  };
+};
 
 async function newParent() {
   const id = randomUUID();
@@ -103,6 +106,30 @@ describe("the Supabase backend", () => {
     await b.giveConsent("2026-10-25");
     await b.giveConsent("2027-01-01");
     expect((await b.account())?.consentVersion).toBe("2027-01-01");
+  });
+});
+
+describe("withdrawing consent on Supabase", () => {
+  it("deletes the sign-in and every row of the family's, and keeps the admin's request log without their ids", async () => {
+    const id = await newParent();
+    const b = backendFor(id);
+    await b.giveConsent("2026-10-25");
+    await b.setPinHash("pbkdf2-sha256$100000$c2FsdA==$aGFzaA==");
+    const riya = await b.createProfile({ nickname: "Riya", avatar: "owl", classId: "UKG", board: "CBSE", language: "en" });
+    await b.startAttempt(riya.id, { id: randomUUID(), topicId: UKG_TOPICS[0].topic.id, attemptNo: 1, practice: false, startedAt: new Date().toISOString() });
+    await b.newQuestions(UKG_TOPICS[0].topic.id, riya.id);
+    await b.deleteAccount();
+    const count = async (sql: string) => (await db.query(sql, [id])).rows[0].n;
+    expect(await count("select count(*)::int n from auth.users where id = $1")).toBe(0);
+    expect(await count("select count(*)::int n from public.parents where id = $1")).toBe(0);
+    expect(await count("select count(*)::int n from public.consents where parent_id = $1")).toBe(0);
+    expect(await count("select count(*)::int n from public.profiles where parent_id = $1")).toBe(0);
+    expect((await db.query("select count(*)::int n from public.quiz_attempts where profile_id = $1", [riya.id])).rows[0].n).toBe(0);
+    expect((await db.query("select count(*)::int n from public.question_requests where profile_id is null and requested_by is null and topic_id = $1", [UKG_TOPICS[0].topic.id])).rows[0].n).toBeGreaterThan(0);
+  });
+
+  it("can't be called signed out", async () => {
+    await expect(as(db, null, d => d.query("select public.delete_my_account()"), { rollback: true })).rejects.toThrow();
   });
 });
 

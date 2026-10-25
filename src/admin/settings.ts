@@ -20,6 +20,8 @@ export interface ChildSettings {
   wrongPenalty: number | null;
   /** Null means the class decides: playful up to Class 5, clean from Class 6. */
   look: Look | null;
+  /** Reading aloud, with a sound for right and wrong. Null means on for the playful look and off for the clean one. */
+  voice: boolean | null;
 }
 
 /** What a quiz uses. */
@@ -56,12 +58,13 @@ const whole = (v: number) => Number.isInteger(v);
 type Range = { min: number; max: number };
 const outside = (v: number, r: Range) => !whole(v) || v < r.min || v > r.max;
 
-function problems(s: Omit<ChildSettings, "look"> & { look?: unknown }): string[] {
+function problems(s: Omit<ChildSettings, "look" | "voice"> & { look?: unknown; voice?: unknown }): string[] {
   const r = QUIZ_LIMITS;
   const out: string[] = [];
   if (s.passPercent !== null && outside(s.passPercent, r.passPercent)) out.push(`The pass mark can be ${r.passPercent.min}% to ${r.passPercent.max}%.`);
   if (s.wrongPenalty !== null && outside(s.wrongPenalty, r.wrongPenalty)) out.push(`Marks off can be ${r.wrongPenalty.min} to ${r.wrongPenalty.max}.`);
   if (s.look != null && !isLook(s.look)) out.push("The look can be playful or clean.");
+  if (s.voice != null && typeof s.voice !== "boolean") out.push("The voice can be on or off.");
   return out;
 }
 

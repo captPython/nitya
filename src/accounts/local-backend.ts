@@ -107,6 +107,13 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
       s.signedIn = null;
       write(s);
     },
+    async deleteAccount() {
+      const s = read();
+      if (!s.signedIn || !s.parents[s.signedIn]) throw new NotSignedIn();
+      delete s.parents[s.signedIn];
+      s.signedIn = null;
+      write(s);
+    },
     async giveConsent(version) {
       change((_, p) => { p.account.consentVersion = version; p.consentAt = new Date().toISOString(); });
     },
@@ -185,14 +192,14 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
     },
     async classSettings() { signedIn(); return bank.classSettings(); },
     async childSettings(profileId) {
-      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, look: null, ...p.quiz?.[profileId] }; });
+      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, look: null, voice: null, ...p.quiz?.[profileId] }; });
     },
     async saveChildSettings(profileId, c) {
       change((_, p) => {
         own(p, profileId);
         const problem = childSettingsProblem(c);
         if (problem) throw new Error(problem);
-        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty, look: c.look };
+        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty, look: c.look, voice: c.voice };
       });
     },
 

@@ -90,10 +90,10 @@ const TEMPLATES: Record<Level, Template[]> = {
 export const BEFORE_AFTER: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 2, title: "Before, after and between" },
   lesson: [
-    { title: "After means one more", text: "The number just after 6 is 7. Count on one step." },
-    { title: "Before means one less", text: "The number just before 6 is 5. Count back one step." },
-    { title: "Between is in the middle", text: "Between 6 and 8 is 7. It sits in the middle, like you between two friends." },
-    { title: "In real life", text: "In a lift, the floors go 3, 4, 5. The floor after 4 is 5. The floor before 4 is 3." },
+    { title: "After means one more", text: "After 6 comes 7. That is one more." },
+    { title: "Before means one less", text: "Before 6 comes 5. That is one less." },
+    { title: "Between is in the middle", text: "Between 6 and 8 is 7. It sits in the middle." },
+    { title: "In real life", text: "Lift floors go 3, 4, 5. After 4 comes 5." },
   ],
   tryIt: { prompt: "What comes just after 9?", options: ["8", "10", "11"], answer: "10",
     praise: "Yes! One more than 9 is 10.", help: "Say 9, then count one more: 10." },

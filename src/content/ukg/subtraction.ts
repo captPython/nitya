@@ -186,10 +186,10 @@ const TEMPLATES: Record<Level, Template[]> = {
 export const SUBTRACTION: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 5, title: "Taking away with objects up to 10" },
   lesson: [
-    { title: "Taking away", text: "Max has 5 balloons. 2 fly away. Count the ones left: 3. 5 − 2 = 3.", visual: dots({ count: 5, color: "blue", crossed: 2 }) },
-    { title: "In real life", text: "You have 6 biscuits and eat 1. Now 5 are left on the plate." },
-    { title: "Count back", text: "For 8 − 3, start at 8 and count back 3: 7, 6, 5. So 8 − 3 = 5." },
-    { title: "The take-away sign", text: "− means take away. = means is left. 7 − 2 = 5 says: 7, take away 2, leaves 5." },
+    { title: "Taking away", text: "5 balloons. 2 fly away. 3 are left. 5 − 2 = 3.", visual: dots({ count: 5, color: "blue", crossed: 2 }) },
+    { title: "In real life", text: "6 biscuits. You eat 1. Now 5 are left." },
+    { title: "Count back", text: "For 8 − 3, start at 8. Count back: 7, 6, 5." },
+    { title: "The take-away sign", text: "− means take away. 7 − 2 = 5: 5 are left." },
   ],
   tryIt: { prompt: "4 apples. 1 is eaten. How many are left?", visual: dots({ count: 4, color: "orange", crossed: 1 }),
     options: ["2", "3", "4"], answer: "3", praise: "Yes! 4 take away 1 leaves 3.", help: "Count the dots that are not crossed out: 1, 2, 3." },

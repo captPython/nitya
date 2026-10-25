@@ -107,6 +107,23 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       await expect(b.startAttempt(riya.id, { id: crypto.randomUUID(), ...play })).rejects.toThrow();
     });
 
+    it("deletes the whole account when the parent withdraws consent, and leaves other families alone", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      await b.setPinHash(HASH);
+      const riya = await b.createProfile(RIYA);
+      await b.saveChildSettings(riya.id, { passPercent: 80, wrongPenalty: null, look: null, voice: null });
+      const other = await w.family();
+      await other.giveConsent(V);
+      const kabir = await other.createProfile(KABIR);
+      await b.deleteAccount();
+      expect(await b.account()).toBeNull();
+      await expect(b.profiles()).resolves.toEqual([]);
+      expect(await other.profiles()).toEqual([kabir]);
+      await expect(other.profileData(riya.id)).rejects.toThrow();
+    });
+
     it("never shows or changes another family's children", async () => {
       const a = await newFamily();
       await a.giveConsent("2026-10-25");
@@ -143,7 +160,7 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       await b.giveConsent(V);
       const riya = await b.createProfile(RIYA);
       const kabir = await b.createProfile(KABIR);
-      const none = { passPercent: null, wrongPenalty: null, look: null };
+      const none = { passPercent: null, wrongPenalty: null, look: null, voice: null };
       const choose = (c: Partial<ChildSettings>): ChildSettings => ({ ...none, ...c });
       expect(await b.childSettings(riya.id)).toEqual(none);
       await b.saveChildSettings(riya.id, choose({ passPercent: 80, wrongPenalty: 2 }));
@@ -167,13 +184,13 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       expect(await b.childSettings(riya.id)).toEqual(none);
     });
 
-    it("keeps a parent's choice of look for each child, with the class deciding until then", async () => {
+    it("keeps a parent's choice of look and voice for each child, with the class deciding until then", async () => {
       const w = await newWorld();
       const b = await w.family();
       await b.giveConsent(V);
       const riya = await b.createProfile(RIYA);
       const kabir = await b.createProfile(KABIR);
-      const quiz = { passPercent: 75, wrongPenalty: null };
+      const quiz = { passPercent: 75, wrongPenalty: null, voice: null };
       await b.saveChildSettings(riya.id, { ...quiz, look: "focus" });
       expect(await b.childSettings(riya.id)).toEqual({ ...quiz, look: "focus" });
       expect((await b.childSettings(kabir.id)).look).toBeNull();
@@ -181,6 +198,12 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       expect((await b.childSettings(kabir.id)).look).toBeNull();
       await b.saveChildSettings(riya.id, { ...quiz, look: null });
       expect(await b.childSettings(riya.id)).toEqual({ ...quiz, look: null });
+      // The voice is kept with the child, so every device the family signs in on reads aloud, or doesn't.
+      await b.saveChildSettings(kabir.id, { ...quiz, look: null, voice: false });
+      expect(await b.childSettings(kabir.id)).toEqual({ ...quiz, look: null, voice: false });
+      expect((await b.childSettings(riya.id)).voice).toBeNull();
+      await expect(b.saveChildSettings(kabir.id, { ...quiz, look: null, voice: "loud" as unknown as boolean })).rejects.toThrow("on or off");
+      expect((await b.childSettings(kabir.id)).voice).toBe(false);
     });
 
     it("lets only an admin see the review queue", async () => {

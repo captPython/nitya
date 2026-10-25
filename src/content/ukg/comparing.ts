@@ -118,10 +118,10 @@ const TEMPLATES: Record<Level, Template[]> = {
 export const COMPARING: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 3, title: "Comparing numbers" },
   lesson: [
-    { title: "More and fewer", text: "Count each group. The group with the bigger number has more. The other has fewer.", visual: dots({ count: 6, color: "blue" }, { count: 3, color: "orange" }) },
-    { title: "In real life", text: "Who has more grapes, you or your friend? Line them up in pairs. The one with grapes left over has more." },
-    { title: "Bigger numbers come later", text: "When you count, 15 comes after 12. So 15 is bigger than 12." },
-    { title: "Tens first", text: "27 and 32: look at the tens. 3 tens is more than 2 tens, so 32 is bigger." },
+    { title: "More and fewer", text: "Count each group. The bigger number has more.", visual: dots({ count: 6, color: "blue" }, { count: 3, color: "orange" }) },
+    { title: "In real life", text: "Line up grapes in pairs. Grapes left over? That side has more." },
+    { title: "Bigger numbers come later", text: "15 comes after 12 when you count. So 15 is bigger." },
+    { title: "Tens first", text: "27 or 32? Check the tens. 3 tens is more, so 32 is bigger." },
   ],
   tryIt: { prompt: "Which is bigger: 14 or 41?", options: ["14", "41"], answer: "41",
     praise: "Yes! 41 has 4 tens. 14 has only 1 ten.", help: "Look at the tens: 41 has 4 tens, 14 has 1 ten." },

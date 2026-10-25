@@ -56,6 +56,11 @@ export interface AccountBackend {
   /** Demo only: acts as if the parent opened the emailed link. */
   openDemoLink?(): Promise<void>;
   signOut(): Promise<void>;
+  /**
+   * Withdraws consent: deletes the parent's account and everything in it (every
+   * child's profile, plays and settings, the consent record and the PIN), then signs out.
+   */
+  deleteAccount(): Promise<void>;
 
   /** Records consent. Nothing about a child can be saved before it. */
   giveConsent(version: string): Promise<void>;
@@ -79,7 +84,7 @@ export interface AccountBackend {
   newQuestions(topicId: string, profileId?: string): Promise<NewQuestionsResult>;
   /** The admin's defaults for every class. */
   classSettings(): Promise<ClassSettings[]>;
-  /** A parent's choices for one child, for all of that child's topics: pass mark, marks off and look. */
+  /** A parent's choices for one child, for all of that child's topics: pass mark, marks off, look and voice. */
   childSettings(profileId: string): Promise<ChildSettings>;
   /** Saves a parent's choices for one child; nulls go back to the class default. */
   saveChildSettings(profileId: string, settings: ChildSettings): Promise<void>;
