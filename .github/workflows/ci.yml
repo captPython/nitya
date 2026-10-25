@@ -43,4 +43,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # PostgREST is the API server inside Supabase; the account tests run supabase-js against it.
+      - name: Install PostgREST
+        run: curl -sSfL https://github.com/PostgREST/postgrest/releases/download/v12.2.3/postgrest-v12.2.3-linux-static-x64.tar.xz | tar xJ -C "$RUNNER_TEMP"
       - run: npm run test:db
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest

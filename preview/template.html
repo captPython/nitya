@@ -153,6 +153,50 @@ p { margin: 0; }
   .topic .act { grid-column: 1 / -1; }
   .topic .act .chipbtn { width: 100%; }
 }
+
+/* Sign-in, consent, PIN, profiles and onboarding */
+.narrow { max-width: 560px; margin: 0 auto; width: 100%; display: grid; gap: 18px; }
+.hero { display: grid; justify-items: center; text-align: center; gap: 10px; }
+.wide { width: 100%; }
+.or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 0.9rem; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 2px solid var(--line); }
+form { display: grid; gap: 10px; }
+label { font-weight: 700; }
+input[type="email"], input[type="text"] {
+  font: inherit; font-size: 1.15rem; min-height: 56px; padding: 0 16px; border-radius: 14px;
+  border: 2px solid var(--line); background: var(--card); color: var(--ink); width: 100%;
+}
+input:focus-visible { outline: 4px solid var(--sun); outline-offset: 2px; }
+.error { color: var(--coral); font-weight: 700; }
+.note { background: var(--sky); border-radius: 14px; padding: 12px 14px; font-size: 0.95rem; }
+.points { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.check { display: flex; gap: 12px; align-items: flex-start; font-weight: 400; cursor: pointer; }
+.check input { width: 26px; height: 26px; flex: none; margin-top: 2px; accent-color: var(--blue); }
+.pin-dots { display: flex; justify-content: center; gap: 16px; }
+.pin-dots span { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--ink); }
+.pin-dots span.on { background: var(--ink); }
+.pinpad { display: grid; grid-template-columns: repeat(3, minmax(0, 88px)); justify-content: center; gap: 12px; }
+.pinpad .btn { min-height: 64px; font-size: 1.6rem; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.choices.avatars { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.choices .btn { min-height: 80px; }
+.choices .btn.on { border-color: var(--blue); background: var(--blue-soft); }
+.choices .btn small { display: block; font-family: var(--font-body); font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+.emoji { font-size: 2.4rem; line-height: 1; }
+.steps { display: flex; gap: 6px; }
+.steps span { flex: 1; height: 8px; border-radius: 999px; background: var(--track); }
+.steps span.on { background: var(--blue); }
+.kids { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 180px)); gap: 14px; }
+.kid { display: grid; justify-items: center; gap: 6px; padding: 18px 12px; min-height: 150px; }
+.kid .emoji { font-size: 3.2rem; }
+.who { display: flex; align-items: center; gap: 10px; }
+.who .emoji { font-size: 2rem; }
+.family { display: grid; gap: 10px; }
+.member { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; align-items: center; padding: 12px 14px; border: 2px solid var(--line); border-radius: 16px; }
+.member .row { grid-column: 1 / -1; }
+.banner { background: var(--coral-soft); border-radius: 14px; padding: 10px 14px; font-weight: 700; }
+pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-radius: 12px; padding: 12px; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; }
+@media (max-width: 420px) { .choices.avatars { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .btn, .fill { transition: none; } .btn:hover { transform: none; } }
 </style>
 
@@ -162,7 +206,7 @@ p { margin: 0; }
       <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="var(--blue)"/><text x="20" y="27" text-anchor="middle" font-family="Baloo 2, sans-serif" font-weight="800" font-size="20" fill="var(--blue-ink)">+</text></svg>
       Nitya
     </div>
-    <span class="tag">Preview · UKG · 5 topics</span>
+    <span class="tag" id="tag"></span>
   </div>
   <div class="stage" id="stage">
     <main class="card" id="screen" aria-live="polite"></main>
@@ -171,512 +215,4 @@ p { margin: 0; }
 </div>
 
 <script>/*ENGINE*/</script>
-<script>
-const M = Nitya;
-const TOPICS = M.UKG_TOPICS;
-const TOPIC_LIST = TOPICS.map(t => t.topic);
-const byId = id => TOPICS.find(t => t.topic.id === id);
-const CLASS_ID = "UKG";
-const MAX = M.maxMarks(CLASS_ID);
-const LEVEL_NAMES = { 1: "Easy", 2: "Medium", 3: "Hard", 4: "Olympiad" };
-const PRACTICE_LENGTH = 8;
-const STORE_KEY = "nitya-ukg-v1";
-const screen = document.getElementById("screen");
-const side = document.getElementById("side");
-const stage = document.getElementById("stage");
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const pick = a => a[Math.floor(Math.random() * a.length)];
-
-const MASCOT = `<svg width="60" height="60" viewBox="0 0 64 64" aria-hidden="true">
-  <ellipse cx="32" cy="36" rx="24" ry="24" fill="var(--sun)"/>
-  <circle cx="23" cy="30" r="8" fill="var(--card)"/><circle cx="41" cy="30" r="8" fill="var(--card)"/>
-  <circle cx="24" cy="31" r="4" fill="var(--ink)"/><circle cx="40" cy="31" r="4" fill="var(--ink)"/>
-  <path d="M28 41 L32 46 L36 41 Z" fill="var(--coral)"/>
-  <path d="M16 19 Q23 14 29 19 M35 19 Q41 14 48 19" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>
-  <path d="M26 50 Q32 54 38 50" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/></svg>`;
-
-/* ---------- saved progress (this browser only) ---------- */
-function freshSave() {
-  return { progress: M.startClass(CLASS_ID, TOPIC_LIST), seen: {}, stars: {}, skills: {}, levels: {}, history: [], promoted: false };
-}
-function load() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (s && s.progress && TOPIC_LIST.every(t => s.progress.topics[t.id])) return s;
-    }
-  } catch (e) {}
-  return freshSave();
-}
-function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch (e) {} }
-let db = load();
-
-/* ---------- question bank (this browser only) ---------- */
-// New questions saves only its seed: replaying the seeds in order makes the same questions again.
-const BANK_KEY = "nitya-ukg-bank-v1";
-const BUILT_IN = new Map(TOPICS.map(t => [t.topic.id, [...t.bank]]));
-let bankStore = null, bankNote = null, bankBusy = false;
-function loadSeeds() {
-  try { const s = JSON.parse(localStorage.getItem(BANK_KEY) || "{}"); return s && typeof s === "object" ? s : {}; } catch (e) { return {}; }
-}
-function saveSeeds(seeds) { try { localStorage.setItem(BANK_KEY, JSON.stringify(seeds)); } catch (e) {} }
-async function addFromSeed(topicId, seed) {
-  const content = byId(topicId);
-  const summary = await M.addNewQuestions(bankStore, content, { seed });
-  content.bank.push(...summary.approved.map(id => bankStore.rows.get(id).question));
-  return summary;
-}
-async function initBank() {
-  for (const t of TOPICS) t.bank = [...BUILT_IN.get(t.topic.id)];
-  bankStore = new M.MemoryQuestionStore(TOPICS.map(M.topicInfo));
-  await M.seedBank(bankStore, TOPICS);
-  for (const [topicId, seeds] of Object.entries(loadSeeds())) {
-    if (byId(topicId)) for (const seed of seeds) await addFromSeed(topicId, seed);
-  }
-}
-function describeAdded(content, summary) {
-  const perLevel = summary.asked / 4;
-  const byLevel = [1, 2, 3, 4].map(l => summary.approved.filter(id => bankStore.rows.get(id).question.level === l).length);
-  const short = [1, 2, 3, 4].filter(l => byLevel[l - 1] < perLevel)
-    .map(l => byLevel[l - 1] ? `${LEVEL_NAMES[l]} had only ${byLevel[l - 1]} new ones left` : `${LEVEL_NAMES[l]} has no new ones left`);
-  const held = summary.inReview.length ? ` ${summary.inReview.length} failed a check and wait for the admin.` : "";
-  return `${content.topic.title}: added ${summary.approved.length} new questions.${short.length ? ` ${short.join("; ")}.` : ""}${held}`;
-}
-async function newQuestions(topicId) {
-  if (bankBusy || !bankStore) return;
-  bankBusy = true;
-  try {
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-    const summary = await addFromSeed(topicId, seed);
-    if (summary.approved.length) {
-      const seeds = loadSeeds();
-      (seeds[topicId] || (seeds[topicId] = [])).push(seed);
-      saveSeeds(seeds);
-    }
-    bankNote = describeAdded(byId(topicId), summary);
-  } catch (e) {
-    bankNote = "Couldn't make new questions: " + e.message;
-  }
-  bankBusy = false;
-  render();
-}
-
-function noteAnswer(q, right) {
-  const k = q.topicId + "|" + q.subSkill;
-  const s = db.skills[k] || (db.skills[k] = { right: 0, total: 0 });
-  s.total++; if (right) s.right++;
-  const l = db.levels[q.level] || (db.levels[q.level] = { right: 0, total: 0 });
-  l.total++; if (right) l.right++;
-}
-
-/* ---------- speech ---------- */
-function speak(text) {
-  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; speechSynthesis.speak(u); } catch (e) {}
-}
-const listenBtn = text => `<button class="ghost" type="button" data-say="${esc(text)}">Listen</button>`;
-screen.addEventListener("click", e => { const b = e.target.closest("[data-say]"); if (b) speak(b.dataset.say); });
-
-/* ---------- dots ---------- */
-function dotsSvg(visual) {
-  if (!visual) return "";
-  const R = 11, G = 6, STEP = 2 * R + G, GROUP_GAP = 30;
-  let x = 0, h = 0;
-  const parts = [];
-  visual.groups.forEach((g, gi) => {
-    const cols = Math.min(10, g.count), rows = Math.ceil(g.count / 10);
-    const fill = g.color === "blue" ? "var(--dot-blue)" : "var(--dot-orange)";
-    for (let i = 0; i < g.count; i++) {
-      const cx = x + R + (i % 10) * STEP, cy = R + Math.floor(i / 10) * STEP;
-      const crossed = g.crossed && i >= g.count - g.crossed;
-      parts.push(`<circle cx="${cx}" cy="${cy}" r="${R}" fill="${fill}" ${crossed ? 'fill-opacity="0.3"' : ""}/>`);
-      if (crossed) parts.push(`<path d="M${cx - 8} ${cy - 8}L${cx + 8} ${cy + 8}M${cx + 8} ${cy - 8}L${cx - 8} ${cy + 8}" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>`);
-    }
-    x += cols * STEP - G + (gi < visual.groups.length - 1 ? GROUP_GAP : 0);
-    h = Math.max(h, rows * STEP - G);
-  });
-  const label = visual.groups.map(g => `${g.count} ${g.color}${g.crossed ? `, ${g.crossed} crossed out` : ""}`).join(" and ");
-  return `<div class="visual"><svg width="${x}" height="${h}" viewBox="0 0 ${x} ${h}" role="img" aria-label="${label} dots">${parts.join("")}</svg></div>`;
-}
-
-/* ---------- app state ---------- */
-let app = { mode: "dash" };
-
-function goDash() { app = { mode: "dash" }; render(); }
-
-function openTopic(topicId) {
-  app = { mode: "lesson", topicId, page: 0 };
-  render();
-}
-
-function attemptNoFor(topicId) {
-  const e = db.progress.topics[topicId];
-  return e.state === "cleared" ? 1 : e.attempts + 1;
-}
-
-function startQuiz(topicId, practiceSkill) {
-  const content = byId(topicId);
-  const bank = practiceSkill ? content.bank.filter(q => q.subSkill === practiceSkill) : content.bank;
-  app = {
-    mode: "quiz", topicId, practiceSkill, bank, practiceTotal: Math.min(PRACTICE_LENGTH, bank.length),
-    state: M.startQuiz({ classId: CLASS_ID, topicId, attemptNo: attemptNoFor(topicId), seenBefore: db.seen[topicId] || [] }),
-    phase: "ask", feedback: null, prevMarks: 0, delta: null,
-  };
-  app.q = M.nextQuestion(app.state, app.bank);
-  render();
-}
-
-function quizDone() {
-  const s = app.state;
-  return app.practiceSkill ? s.asked.length >= app.practiceTotal && !s.pendingRetry : M.isFinished(s);
-}
-
-function nextQ() {
-  app.prevMarks = app.state.marks;
-  app.delta = null;
-  app.q = M.nextQuestion(app.state, app.bank);
-  app.phase = "ask";
-  app.feedback = null;
-  app.tried = null;
-  render();
-}
-
-function finish() {
-  const s = app.state;
-  db.seen[app.topicId] = [...(db.seen[app.topicId] || []).filter(id => !s.asked.includes(id)), ...s.asked];
-  if (app.practiceSkill) {
-    save();
-    app = { mode: "practice-done", topicId: app.topicId, skill: app.practiceSkill, correct: s.correct, total: s.asked.length };
-    render();
-    return;
-  }
-  const outcome = M.finishQuiz(s);
-  const r = M.recordAttempt(db.progress, TOPIC_LIST, app.topicId, outcome.marks, outcome.cleared);
-  db.progress = r.progress;
-  if (outcome.cleared) db.stars[app.topicId] = Math.max(db.stars[app.topicId] || 0, outcome.stars);
-  db.history.push({ topicId: app.topicId, marks: outcome.marks, cleared: outcome.cleared, at: Date.now() });
-  if (r.effect.kind === "promoted") db.promoted = true;
-  save();
-  app = { mode: "result", topicId: app.topicId, outcome, effect: r.effect };
-  render();
-}
-
-/* ---------- screens ---------- */
-function renderDash() {
-  const states = TOPIC_LIST.map(t => db.progress.topics[t.id]);
-  const clearedCount = states.filter(s => s.state === "cleared").length;
-  const totalStars = Object.values(db.stars).reduce((a, b) => a + b, 0);
-  const passPct = (M.PASS_MARKS / MAX) * 100;
-
-  const rows = TOPIC_LIST.map((t, i) => {
-    const e = db.progress.topics[t.id];
-    const stars = db.stars[t.id] || 0;
-    const bestPct = Math.min(100, (e.bestScore / MAX) * 100);
-    const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
-    const score = e.attempts
-      ? `<span>Best ${e.bestScore} / ${MAX}</span><span class="mini" aria-hidden="true"><b class="${e.bestScore >= M.PASS_MARKS ? "ok" : ""}" style="width:${bestPct}%"></b><i style="left:${passPct}%"></i></span><span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>${stars ? `<span class="stars-sm" aria-label="${stars} stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</span>` : ""}`
-      : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
-    const act = e.state === "current"
-      ? `<button class="chipbtn" type="button" data-open="${t.id}">${e.attempts ? "Try again" : "Start"}</button>`
-      : e.state === "cleared" ? `<button class="chipbtn soft" type="button" data-open="${t.id}">Practise</button>` : "";
-    return `<div class="topic ${e.state}">
-      <span class="num" aria-hidden="true">${e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1}</span>
-      <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
-      <div class="act">${act}</div></div>`;
-  }).join("");
-
-  const areas = Object.entries(db.skills)
-    .map(([k, v]) => { const [tid, skill] = k.split("|"); return { tid, skill, acc: v.right / v.total, total: v.total }; })
-    .filter(a => a.total >= 2 && a.acc < 0.8)
-    .sort((a, b) => a.acc - b.acc)
-    .slice(0, 4);
-  const areasHtml = areas.length
-    ? areas.map(a => {
-        const c = byId(a.tid);
-        const open = db.progress.topics[a.tid].state !== "locked";
-        return `<div class="area"><div><b>${esc(c.subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(c.topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
-          ${open ? `<button class="ghost" type="button" data-practice="${a.tid}|${a.skill}">Practise</button>` : ""}
-          <span class="mini" aria-hidden="true"><b style="width:${a.acc * 100}%"></b></span></div>`;
-      }).join("")
-    : `<p class="muted small">Nothing to work on yet. After each quiz, skills under 80% show up here with a practice button.</p>`;
-
-  const levelsHtml = [1, 2, 3, 4].map(l => {
-    const v = db.levels[l];
-    const pct = v && v.total ? Math.round((v.right / v.total) * 100) : null;
-    return `<div class="lvlrow"><span>L${l} ${LEVEL_NAMES[l]}</span><span class="mini" aria-hidden="true"><b style="width:${pct ?? 0}%"></b></span><span>${pct === null ? "–" : pct + "%"}</span></div>`;
-  }).join("");
-
-  screen.innerHTML = `
-    <div class="dash-head">
-      <div style="display:grid;gap:4px"><span class="label">Class dashboard</span><h1>UKG Maths</h1></div>
-      <div class="row" style="gap:24px">
-        <div><div class="bigstat">${clearedCount} / ${TOPIC_LIST.length}</div><div class="small muted">topics cleared</div></div>
-        <div><div class="bigstat" style="color:var(--sun)">★ ${totalStars}</div><div class="small muted">stars</div></div>
-      </div>
-    </div>
-    <div class="overall">
-      <div class="segs" aria-label="${clearedCount} of ${TOPIC_LIST.length} topics cleared">${states.map(s => `<span class="seg ${s.state}"></span>`).join("")}</div>
-      <p class="small muted">${db.promoted ? "UKG complete! Class 1 opens in Phase 2." : `Clear every topic to move up to Class 1. Each quiz needs ${M.PASS_MARKS} of ${MAX} marks.`}</p>
-    </div>
-    <div class="topics">${rows}</div>
-    <div class="panels">
-      <div class="panel"><span class="label">Improvement areas</span>${areasHtml}</div>
-      <div class="panel"><span class="label">Right first time, by level</span>${levelsHtml}</div>
-    </div>`;
-  screen.querySelectorAll("[data-open]").forEach(b => b.onclick = () => openTopic(b.dataset.open));
-  screen.querySelectorAll("[data-practice]").forEach(b => b.onclick = () => { const [t, s] = b.dataset.practice.split("|"); startQuiz(t, s); });
-}
-
-function lockIcon() {
-  return `<svg width="16" height="18" viewBox="0 0 16 18" aria-label="Locked"><rect x="1" y="8" width="14" height="9" rx="2" fill="var(--muted)"/><path d="M4 8V5a4 4 0 0 1 8 0v3" fill="none" stroke="var(--muted)" stroke-width="2"/></svg>`;
-}
-
-function renderLesson() {
-  const c = byId(app.topicId);
-  const pages = c.lesson;
-  const n = pages.length + 1;
-  const crumbs = `<div class="row" style="justify-content:space-between"><span class="muted small">${esc(c.topic.title)} · Lesson ${Math.min(app.page + 1, n)} of ${n}</span>
-    ${app.peek ? `<button class="ghost" type="button" id="backq">Back to my question</button>` : `<button class="ghost" type="button" id="todash">Class map</button>`}</div>`;
-  if (app.page < pages.length) {
-    const p = pages[app.page];
-    screen.innerHTML = `${crumbs}
-      <div class="mascot">${MASCOT}<div class="bubble"><h2>${esc(p.title)}</h2><p>${esc(p.text)}</p></div></div>
-      ${dotsSvg(p.visual)}
-      <div class="row">${listenBtn(p.text)}
-        ${app.page > 0 ? `<button class="ghost" type="button" id="back">Back</button>` : ""}
-        <button class="btn primary" type="button" id="next">Next</button></div>`;
-    document.getElementById("next").onclick = () => { app.page++; render(); };
-    const back = document.getElementById("back");
-    if (back) back.onclick = () => { app.page--; render(); };
-  } else {
-    const t = c.tryIt;
-    screen.innerHTML = `${crumbs}
-      <div class="mascot">${MASCOT}<div class="bubble"><span class="label">Try it</span><p class="prompt">${esc(t.prompt)}</p></div></div>
-      ${dotsSvg(t.visual)}
-      <div class="opts">${t.options.map(o => `<button class="btn" type="button" data-try="${esc(o)}">${esc(o)}</button>`).join("")}</div>
-      <div id="tryfb"></div>
-      <div class="row">${listenBtn(t.prompt)}<button class="ghost" type="button" id="back">Back</button></div>`;
-    document.getElementById("back").onclick = () => { app.page--; render(); };
-    screen.querySelectorAll("[data-try]").forEach(b => b.onclick = () => {
-      const fb = document.getElementById("tryfb");
-      if (b.dataset.try === t.answer) {
-        b.classList.add("right");
-        fb.innerHTML = `<div class="feedback good"><b>You got it!</b> ${esc(t.praise)}</div>
-          <div class="row" style="margin-top:12px"><button class="btn primary" type="button" id="go">${app.peek ? "Back to my question" : "Start the quiz"}</button></div>`;
-        document.getElementById("go").onclick = () => app.peek ? backToQuiz() : startQuiz(app.topicId);
-      } else {
-        b.classList.add("tried");
-        fb.innerHTML = `<div class="feedback gentle"><b>Let's look again.</b> ${esc(t.help)} Try again!</div>`;
-      }
-    });
-  }
-  const td = document.getElementById("todash");
-  if (td) td.onclick = goDash;
-  const bq = document.getElementById("backq");
-  if (bq) bq.onclick = backToQuiz;
-}
-
-function backToQuiz() { app = app.saved; app.prevMarks = app.state.marks; render(); }
-
-function marksBar() {
-  const s = app.state;
-  const passPct = (M.PASS_MARKS / MAX) * 100;
-  const q = s.marks >= M.PASS_MARKS;
-  const d = app.delta;
-  const deltaHtml = d === null || d === undefined ? "" : d > 0 ? `<span class="delta up">+${d}</span>` : d < 0 ? `<span class="delta down">−${-d}</span>` : "";
-  return `<div class="marks">
-    <div class="marks-top">
-      <div><span class="label">Marks</span><div><span class="marks-num">${s.marks}</span>${deltaHtml}</div></div>
-      <span class="qual ${q ? "yes" : ""}">${q ? "Pass mark crossed! Keep going to the end." : `${M.PASS_MARKS - s.marks} more ${M.PASS_MARKS - s.marks === 1 ? "mark" : "marks"} to pass`}</span>
-    </div>
-    <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${MAX}" aria-valuenow="${s.marks}" aria-label="Marks">
-      <div class="fill ${q ? "qualified" : ""}" id="fill" style="width:${(Math.min(app.prevMarks, MAX) / MAX) * 100}%"></div>
-      <div class="passmark ${q ? "crossed" : ""}" style="left:${passPct}%"><span>${q ? "✓ " : ""}Pass ${M.PASS_MARKS}</span></div>
-    </div>
-    <div class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away 1.</div>
-  </div>`;
-}
-
-function renderQuiz() {
-  const { q, state: s } = app;
-  const practice = !!app.practiceSkill;
-  const total = practice ? app.practiceTotal : M.QUIZ_LENGTH;
-  const qNo = app.phase === "ask" ? s.asked.length + 1 : s.asked.length;
-  const locked = app.phase === "done";
-  const c = byId(app.topicId);
-  screen.innerHTML = `
-    <div class="row" style="justify-content:space-between">
-      <span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(c.subSkillNames[app.practiceSkill])}` : ""} · Question ${qNo} of ${total}</span>
-      <button class="ghost" type="button" id="relesson">See the lesson</button></div>
-    ${practice ? "" : marksBar()}
-    <div class="mascot">${MASCOT}<div class="bubble"><span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span><p class="prompt">${esc(q.prompt)}</p></div></div>
-    ${dotsSvg(q.visual)}
-    <div class="opts">${q.options.map(o => `<button class="btn" type="button" data-opt="${esc(o)}" ${locked ? "disabled" : ""}>${esc(o)}</button>`).join("")}</div>
-    <div id="fb">${app.feedback ?? ""}</div>
-    <div class="row">${listenBtn(q.prompt)}${locked ? `<button class="btn primary" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button>` : ""}</div>`;
-
-  if (locked) screen.querySelectorAll("[data-opt]").forEach(b => { if (q.answers.includes(b.dataset.opt)) b.classList.add("right"); });
-  if (app.phase === "retry" && app.tried) {
-    const t = [...screen.querySelectorAll("[data-opt]")].find(b => b.dataset.opt === app.tried);
-    if (t) { t.classList.add("tried"); t.disabled = true; }
-  }
-  const fill = document.getElementById("fill");
-  if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = (Math.min(s.marks, MAX) / MAX) * 100 + "%"; }));
-
-  document.getElementById("relesson").onclick = () => { const saved = app; app = { mode: "lesson", topicId: saved.topicId, page: 0, peek: true, saved }; render(); };
-  const cont = document.getElementById("cont");
-  if (cont) cont.onclick = () => (quizDone() ? finish() : nextQ());
-  screen.querySelectorAll("[data-opt]:not([disabled])").forEach(b => b.onclick = () => answer(b.dataset.opt));
-}
-
-function answer(choice) {
-  const q = app.q;
-  app.prevMarks = app.state.marks;
-  if (app.phase === "ask") {
-    const r = M.answerFirstTry(app.state, q, choice);
-    app.state = r.state;
-    app.delta = r.result.marksDelta;
-    noteAnswer(q, r.result.kind === "praise");
-    save();
-    if (r.result.kind === "praise") {
-      app.phase = "done";
-      app.feedback = `<div class="feedback good"><b>${pick(["Super!", "Well done!", "Brilliant!", "Yes!"])}</b> ${esc(r.result.reason)}</div>`;
-    } else {
-      app.phase = "retry";
-      app.tried = choice;
-      app.feedback = `<div class="feedback gentle"><b>Nice try! Here's a hint.</b> ${esc(r.result.hint)} Have another go.</div>`;
-    }
-  } else if (app.phase === "retry") {
-    const r = M.answerRetry(app.state, q, choice);
-    app.state = r.state;
-    app.phase = "done";
-    app.feedback = r.retryCorrect
-      ? `<div class="feedback good"><b>You worked it out!</b> ${esc(r.explanation)}</div>`
-      : `<div class="feedback gentle"><b>Let's do it together.</b> ${esc(r.explanation)} The answer is <b>${esc(r.answer)}</b>.</div>`;
-  }
-  render();
-}
-
-function renderResult() {
-  const { outcome: o, effect } = app;
-  const c = byId(app.topicId);
-  const passPct = (M.PASS_MARKS / MAX) * 100;
-  const bar = `<div class="marks"><div class="marks-top"><div><span class="label">Final marks</span><div class="marks-num">${o.marks} / ${MAX}</div></div>
-      <span class="qual ${o.cleared ? "yes" : ""}">${o.cleared ? "Above the pass mark" : `${M.PASS_MARKS - o.marks} short of the pass mark`}</span></div>
-    <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>Pass ${M.PASS_MARKS}</span></div></div>
-    <div class="small muted">${o.correct} of ${M.QUIZ_LENGTH} right first time</div></div>`;
-
-  if (o.cleared && effect.kind === "promoted") {
-    screen.innerHTML = `
-      <div class="cert">${MASCOT}<span class="label">Certificate</span><h1>UKG Maths complete!</h1>
-        <p>You cleared all ${TOPIC_LIST.length} topics. You are ready for Class 1.</p>
-        <div class="stars" aria-label="${o.stars} stars">${"★".repeat(o.stars)}${"☆".repeat(3 - o.stars)}</div>
-        <p class="small muted">Class 1 opens in Phase 2 of this preview.</p></div>
-      ${bar}
-      <div class="row"><button class="btn primary" type="button" id="dash">See my UKG dashboard</button></div>`;
-  } else if (o.cleared) {
-    const next = byId(effect.topicId);
-    screen.innerHTML = `
-      <div class="mascot">${MASCOT}<div class="bubble"><h2>Topic cleared!</h2><p>${esc(c.topic.title)} is done. The next topic is open.</p></div></div>
-      <div class="stars" aria-label="${o.stars} stars">${"★".repeat(o.stars)}${"☆".repeat(3 - o.stars)}</div>
-      ${bar}
-      <div class="row">
-        <button class="btn primary" type="button" id="nexttopic">Next topic: ${esc(next.topic.title)}</button>
-        <button class="ghost" type="button" id="dash">Class map</button>
-        <button class="ghost" type="button" id="again">Play this one again</button>
-      </div>`;
-    document.getElementById("nexttopic").onclick = () => openTopic(next.topic.id);
-  } else {
-    const weak = o.weakSubSkills[0];
-    screen.innerHTML = `
-      <div class="mascot">${MASCOT}<div class="bubble"><h2>Almost there!</h2><p>You need ${M.PASS_MARKS} marks to open the next topic. Harder questions give more marks.</p></div></div>
-      ${bar}
-      <div class="row">
-        <button class="btn primary" type="button" id="lesson">Watch the lesson again</button>
-        <button class="ghost" type="button" id="again">Try with new questions</button>
-        ${o.offerPractice && weak ? `<button class="ghost" type="button" id="practice">Extra practice: ${esc(c.subSkillNames[weak] || weak)}</button>` : ""}
-        <button class="ghost" type="button" id="dash">Class map</button>
-      </div>`;
-    document.getElementById("lesson").onclick = () => openTopic(app.topicId);
-    const pr = document.getElementById("practice");
-    if (pr) pr.onclick = () => startQuiz(app.topicId, weak);
-  }
-  const again = document.getElementById("again");
-  if (again) again.onclick = () => startQuiz(app.topicId);
-  document.getElementById("dash").onclick = goDash;
-}
-
-function renderPracticeDone() {
-  const c = byId(app.topicId);
-  screen.innerHTML = `
-    <div class="mascot">${MASCOT}<div class="bubble"><h2>Practice done!</h2><p>You got ${app.correct} of ${app.total} on ${esc(c.subSkillNames[app.skill])}. Practice does not change your marks.</p></div></div>
-    <div class="row"><button class="btn primary" type="button" id="quiz">Try the quiz again</button><button class="ghost" type="button" id="dash">Class map</button></div>`;
-  document.getElementById("quiz").onclick = () => startQuiz(app.topicId);
-  document.getElementById("dash").onclick = goDash;
-}
-
-/* ---------- grown-up panel ---------- */
-function renderSide() {
-  if (app.mode !== "quiz") {
-    stage.classList.toggle("solo", app.mode !== "dash");
-    side.hidden = app.mode !== "dash";
-    side.innerHTML = `<span class="label">Tester tools (preview only)</span>
-      <p class="small muted">Progress and added questions are saved in this browser. Reset to see a brand-new UKG class.</p>
-      <div class="tools"><button class="ghost" type="button" id="reset">Reset all progress</button></div>
-      <div class="tools"><span class="label">Question bank</span>
-        <p class="small muted">New questions makes fresh questions from the topic's templates, checks every one, and adds the ones that pass. Quizzes start using them straight away.</p>
-        ${TOPICS.map(t => `<div class="bankrow"><span class="small"><b>${esc(t.topic.title)}</b> · <span class="muted">${t.bank.length} questions</span></span>
-          <button class="ghost" type="button" data-newq="${t.topic.id}" ${bankStore && !bankBusy ? "" : "disabled"}>New questions</button></div>`).join("")}
-        ${bankNote ? `<p class="small" role="status">${esc(bankNote)}</p>` : ""}</div>`;
-    side.querySelectorAll("[data-newq]").forEach(b => b.onclick = () => newQuestions(b.dataset.newq));
-    const reset = document.getElementById("reset");
-    if (reset) reset.onclick = async () => {
-      if (reset.dataset.sure) {
-        db = freshSave(); save(); saveSeeds({}); bankNote = null; bankStore = null;
-        goDash();
-        await initBank(); render();
-      }
-      else { reset.dataset.sure = "1"; reset.textContent = "Tap again to reset"; }
-    };
-    return;
-  }
-  stage.classList.remove("solo");
-  side.hidden = false;
-  const s = app.state;
-  const rungs = [4, 3, 2, 1].map(l => `<div class="rung ${s.level === l ? "on" : ""}"><span>L${l} ${LEVEL_NAMES[l]}</span><span>${s.responses.filter(r => r.level === l && r.firstTryCorrect).length}✓</span></div>`).join("");
-  side.innerHTML = `<span class="label">Grown-up view</span>
-    <span class="small muted">Highlighted: level of the next question</span>
-    <div class="ladder">${rungs}</div>
-    <div class="stat"><span>Marks</span><b>${s.marks} / ${MAX}</b></div>
-    <div class="stat"><span>Right first time</span><b>${s.correct} / ${s.asked.length}</b></div>
-    <div class="stat"><span>Attempt</span><b>${s.attemptNo}</b></div>
-    <div class="tools"><span class="label">Tester tools</span>
-      <button class="ghost" type="button" id="tright">Answer right</button>
-      <button class="ghost" type="button" id="twrong">Answer wrong</button></div>`;
-  const q = app.q;
-  const wrong = () => q.options.find(o => !q.answers.includes(o) && o !== app.tried) ?? q.options.find(o => !q.answers.includes(o));
-  document.getElementById("tright").onclick = () => tester(q.answers[0]);
-  document.getElementById("twrong").onclick = () => tester(wrong());
-}
-
-function tester(choice) {
-  if (app.phase === "done") { quizDone() ? finish() : nextQ(); return; }
-  answer(choice);
-  if (app.phase === "retry") answer(app.q.options.find(o => !app.q.answers.includes(o) && o !== app.tried) ?? choice);
-}
-
-function render() {
-  if (app.mode === "dash") renderDash();
-  else if (app.mode === "lesson") renderLesson();
-  else if (app.mode === "quiz") renderQuiz();
-  else if (app.mode === "result") renderResult();
-  else renderPracticeDone();
-  renderSide();
-  const view = app.mode + (app.topicId || "") + (app.page ?? "");
-  if (view !== lastView) { lastView = view; try { window.scrollTo(0, 0); } catch (e) {} }
-}
-let lastView = "";
-
-render();
-initBank().then(render, e => { bankNote = "Couldn't load the question bank: " + e.message; render(); });
-</script>
+<script>/*APP*/</script>

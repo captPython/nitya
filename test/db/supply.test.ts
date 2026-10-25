@@ -58,7 +58,7 @@ describe("the Postgres question store", () => {
       await q.query("insert into public.consents (parent_id, consent_version) values ($1, 'v1')", [PARENT_A]);
       const { rows } = await q.query(
         `insert into public.profiles (parent_id, nickname, avatar, class_id, board, language)
-         values ($1, 'Riya', 'owl', 'UKG', 'CBSE', 'English') returning id`, [PARENT_A]);
+         values ($1, 'Riya', 'owl', 'UKG', 'CBSE', 'en') returning id`, [PARENT_A]);
       return rows[0].id as string;
     });
     for (const seed of [1, 2, 3]) {

@@ -30,7 +30,7 @@ async function familyWithChild(parent: string, nickname: string): Promise<string
     await q.query("insert into public.consents (parent_id, consent_version) values ($1, 'v1')", [parent]);
     const { rows } = await q.query(
       `insert into public.profiles (parent_id, nickname, avatar, class_id, board, language)
-       values ($1, $2, 'owl', 'UKG', 'CBSE', 'English') returning id`,
+       values ($1, $2, 'owl', 'UKG', 'CBSE', 'en') returning id`,
       [parent, nickname],
     );
     return rows[0].id as string;
@@ -180,7 +180,7 @@ describe("families", () => {
     await expect(as(db, NEW_PARENT, async q => {
       await q.query("insert into public.parents (id) values ($1)", [NEW_PARENT]);
       await q.query(`insert into public.profiles (parent_id, nickname, avatar, class_id, board, language)
-                     values ($1, 'Kai', 'cat', 'LKG', 'CBSE', 'English')`, [NEW_PARENT]);
+                     values ($1, 'Kai', 'owl', 'LKG', 'CBSE', 'en')`, [NEW_PARENT]);
     })).rejects.toThrow(/row-level security/);
   });
 
@@ -237,7 +237,7 @@ describe("families", () => {
   it("deletes a child's progress, quizzes and answers with the profile", async () => {
     const extra = await as(db, PARENT_B, async q => {
       const { rows } = await q.query(`insert into public.profiles (parent_id, nickname, avatar, class_id, board, language)
-                                      values ($1, 'Temp', 'fox', 'UKG', 'CBSE', 'English') returning id`, [PARENT_B]);
+                                      values ($1, 'Temp', 'panda', 'UKG', 'CBSE', 'en') returning id`, [PARENT_B]);
       return rows[0].id as string;
     });
     await addQuestion("q-temp");
