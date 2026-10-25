@@ -6,11 +6,14 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
     "typecheck": "tsc",
     "preview": "node preview/build.mjs"
   },
   "devDependencies": {
+    "@types/pg": "^8.23.1",
     "esbuild": "^0.21.5",
+    "pg": "^8.23.1",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
   }

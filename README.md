@@ -20,3 +20,18 @@ npm test           # run the tests
 npm run typecheck  # strict TypeScript check
 npm run preview    # build dist/preview.html, then open it in a browser
 ```
+
+## Database
+
+The Supabase schema lives in `supabase/migrations`:
+
+- `20261025100000_initial_schema.sql`: tables for the question bank, check runs and admin reviews, parents, consent records, child profiles, topic progress, quizzes and answers, level bands, and the admin and per-child topic settings. Row-level security means each family sees only its own data, only admins can change the question bank and settings, and admins get no access to family data.
+- `20261025100100_reference_data.sql`: the 5 UKG topics, the level bands (L1 85%+, L2 65 to 85%, L3 50 to 65%, L4 under 50%) and each topic's defaults (pass mark 44, 1 mark off for a wrong first try).
+
+To apply them to a Supabase project, run the files in name order in the SQL editor, or use the Supabase CLI (`supabase link`, then `supabase db push`). To make someone an admin, add their user id to `public.admins` from the dashboard.
+
+The database tests run the migrations on a fresh Postgres database, using `test/db/supabase-stub.sql` to stand in for Supabase's auth schema and roles:
+
+```sh
+DATABASE_URL=postgres://postgres@localhost:5432/postgres npm run test:db
+```
