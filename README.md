@@ -11,6 +11,7 @@ Each class has topics that unlock in order. A topic is a short lesson followed b
 - `src/content/`: seeded question generators. UKG has 5 topics with 80 questions each (20 per level).
 - `src/accounts/`: sign-in, parental consent, child profiles, the parent PIN, the placement check and saved progress (see Accounts below).
 - `preview/`: the app's page (`app.js`, `template.html`) and the build that makes it one HTML file, as the demo preview or the real app.
+- `src/looks.ts`: which look a child sees, playful or clean (see Looks below).
 - `src/validation/`: the validation engine that checks every question before a child sees it (see below).
 - `src/supply/`: the question supply engine: New questions, CSV import, the admin's Drive folder, and saving to the database (see below).
 - `src/admin/`: the rules behind the admin panel and parents' quiz settings: class defaults, each child's own pass mark and marks off, level bands, and the review queue's fix form (see Admin panel below).
@@ -97,9 +98,16 @@ A parent owns the account and signs in with Google or a one-time email link. Chi
 5. **Placement check (optional):** 10 questions across the class's topics at Medium and above, with no marks shown. 90% or more suggests the next class and under 40% the one before, when that class has content. The parent chooses.
 6. **Dashboard:** the child lands on their class map. Each profile keeps its own progress, and the app remembers who was playing on this device.
 
-**Grown-ups** lists the children, and lets the parent edit a profile, change a child's quiz settings, download a profile's data as JSON, delete a profile with its progress, add a child, change the PIN and sign out.
+**Grown-ups** lists the children, and lets the parent edit a profile, change a child's settings (quiz settings and look), download a profile's data as JSON, delete a profile with its progress, add a child, change the PIN and sign out.
 
 **Quiz settings:** a parent can set one child's pass mark and the marks off for a wrong first try, higher or lower than the class default, to fit that child. One choice covers all of the child's topics. The pass mark is a percentage of the 68 marks a quiz can give, to the nearest mark (65% is 44 marks, 80% is 54), from 1% to 100%; marks off can be 0 to 4. A child whose parent hasn't chosen follows the class default. The child's dashboard shows the pass mark that child needs, and the quiz counts towards it in marks.
+
+**Looks:** the app has two looks that share one layout, so the screens, buttons and their order stay the same and only the colours, fonts and decoration change.
+
+- **Playful**, for LKG to Class 5: bright colours, chunky buttons that press down, a dotted trail of topics, big answer tiles and the owl.
+- **Clean**, from Class 6: calm colours, flat cards, a ring for each topic's best score, and full-width answers with A/B/C keys that a keyboard can press.
+
+The class picks the look, so a child who moves up to Class 6 gets the clean look. A parent can choose either look for any child in that child's settings, or go back to letting the class decide. Grown-up screens (sign-in, the PIN, Grown-ups, settings and the admin panel) always use the clean look. After a wrong first try, both looks mark the answer the child tried, show the hint on its own card, and say that the second try won't change the marks.
 
 Every quiz is saved as it is played: the play when it starts, each answer as it is given, and the marks and topic progress at the end. Practice rounds are saved too, but never change topic progress.
 
@@ -152,6 +160,7 @@ The Supabase schema lives in `supabase/migrations`:
 - `20261025120000_question_requests.sql`: the log of New questions requests. A family sees only its own requests and the admin sees all; only the server writes it.
 - `20261025130000_accounts.sql`: the parent PIN hash, the fixed onboarding choices for profiles, and practice plays.
 - `20261025150000_admin_panel.sql`: replaces the per-topic settings with one default per class (`class_settings`) and each child's own choice (`profiles.pass_percent` and `wrong_penalty`), and adds `review_question` and `set_level_bands`, which save a review or the four bands in one step and only for an admin.
+- `20261025170000_child_look.sql`: each child's look (`profiles.look`, `play` or `focus`), where empty means the class decides.
 
 To apply them to a Supabase project, run the files in name order in the SQL editor, or use the Supabase CLI (`supabase link`, then `supabase db push`). To make someone an admin, add their user id to `public.admins` from the dashboard.
 
