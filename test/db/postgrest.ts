@@ -9,12 +9,22 @@ const SECRET = "nitya-tests-only-jwt-secret-0123456789";
 
 const base64url = (v: string | Buffer) => Buffer.from(v).toString("base64url");
 
-/** A signed-in user's token, as Supabase Auth would issue it. */
-export function jwtFor(userId: string): string {
+function sign(claims: Record<string, unknown>): string {
   const head = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const body = base64url(JSON.stringify({ sub: userId, role: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 }));
+  const body = base64url(JSON.stringify({ ...claims, exp: Math.floor(Date.now() / 1000) + 3600 }));
   const sig = createHmac("sha256", SECRET).update(`${head}.${body}`).digest("base64url");
   return `${head}.${body}.${sig}`;
+}
+
+/** A signed-in user's token, as Supabase Auth would issue it. */
+export const jwtFor = (userId: string) => sign({ sub: userId, role: "authenticated" });
+
+/** The user a token from jwtFor belongs to, checking its signature, as Supabase Auth checks a real one. */
+export function userOf(token: string): string | null {
+  const [head, body, sig] = token.split(".");
+  if (!head || !body || createHmac("sha256", SECRET).update(`${head}.${body}`).digest("base64url") !== sig) return null;
+  const claims = JSON.parse(Buffer.from(body, "base64url").toString());
+  return claims.role === "authenticated" && typeof claims.sub === "string" ? claims.sub : null;
 }
 
 const freePort = () => new Promise<number>((resolve, reject) => {
@@ -30,6 +40,8 @@ const freePort = () => new Promise<number>((resolve, reject) => {
  */
 export async function startPostgrest(db: pg.Client, databaseUrl: string): Promise<{
   clientFor: (userId: string) => SupabaseClient;
+  /** The server's client, with the service role, as the New questions function has it. */
+  serviceClient: () => SupabaseClient;
   stop: () => Promise<void>;
 }> {
   await db.query(`do $$ begin
@@ -37,7 +49,7 @@ export async function startPostgrest(db: pg.Client, databaseUrl: string): Promis
       create role authenticator login noinherit;
     end if;
   end $$`);
-  await db.query("grant anon, authenticated to authenticator");
+  await db.query("grant anon, authenticated, service_role to authenticator");
 
   const dbUrl = new URL(databaseUrl);
   dbUrl.username = "authenticator";
@@ -86,6 +98,9 @@ export async function startPostgrest(db: pg.Client, databaseUrl: string): Promis
   return {
     clientFor: userId => createClient(`http://127.0.0.1:${proxyPort}`, "anon-key-unused-in-tests", {
       accessToken: async () => jwtFor(userId),
+    }),
+    serviceClient: () => createClient(`http://127.0.0.1:${proxyPort}`, "service-key-unused-in-tests", {
+      accessToken: async () => sign({ role: "service_role" }),
     }),
     async stop() {
       proc.kill();

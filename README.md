@@ -13,9 +13,11 @@ Each class has topics that unlock in order. A topic is a short lesson followed b
 - `preview/`: the app's page (`app.js`, `template.html`) and the build that makes it one HTML file, as the demo preview or the real app.
 - `src/validation/`: the validation engine that checks every question before a child sees it (see below).
 - `src/supply/`: the question supply engine: New questions, CSV import, the admin's Drive folder, and saving to the database (see below).
+- `src/admin/`: the rules behind the admin panel and parents' quiz settings: class defaults, each child's own pass mark and marks off, level bands, and the review queue's fix form (see Admin panel below).
+- `src/server/`: the New questions server function, which runs as a Supabase Edge Function from `supabase/functions/new-questions`.
 - `scripts/questions.ts`: commands that fill the question bank in the database.
 - `docs/question-template.csv`: a sample question CSV to copy.
-- `test/`: Vitest tests for the engine, progression, content, validation, question supply and accounts.
+- `test/`: Vitest tests for the engine, progression, content, validation, question supply, accounts, the admin panel and the server function.
 
 ## Commands
 
@@ -25,6 +27,7 @@ npm test           # run the tests
 npm run typecheck  # strict TypeScript check
 npm run preview    # build the demo, dist/preview.html, then open it in a browser
 npm run app        # build the real app, dist/app/index.html (see Setting up sign-in below)
+npm run functions  # build the New questions server function (see Setting up sign-in below)
 npm run test:db    # database tests (see Database below)
 npm run questions -- <command>   # fill the question bank (see Question supply below)
 ```
@@ -46,7 +49,7 @@ npm run questions -- <command>   # fill the question bank (see Question supply b
 Questions reach the bank three ways. Every question passes through the validation engine on the way in: one that passes is saved as approved, and one that fails is saved as `in_review` with its report, for the admin to fix or reject.
 
 - **Built-in banks:** the 400 UKG questions. `npm run questions -- seed` loads them; running it again changes nothing.
-- **New questions:** makes fresh questions from a topic's templates with a new random seed, 20 per level by default, skipping any the bank already has. It runs only when someone asks: `npm run questions -- new <topic-id>` for now, and a button for admins, parents and children with the admin panel. The demo preview has the button in its tester tools. Each request is logged in `question_requests`. A level stops short when its templates have no new questions left (today UKG adding and taking away have none left at L1, and counting and before-and-after have fewer than 15 at L1 and L2).
+- **New questions:** makes fresh questions from a topic's templates with a new random seed, 20 per level by default, skipping any the bank already has. It runs only when someone asks: the **New questions** button on each open topic of a child's dashboard, the admin panel's New questions tab, or `npm run questions -- new <topic-id>`. In the app the button calls the New questions server function, which lets a family ask 10 times a day (`NEW_QUESTIONS_PER_DAY` in `src/server/new-questions.ts`) and an admin any number of times. Each request is logged in `question_requests`, with who asked. A level stops short when its templates have no new questions left (today UKG adding and taking away have none left at L1, and counting and before-and-after have fewer than 15 at L1 and L2).
 - **CSV files:** `npm run questions -- import <file.csv>`, or `npm run questions -- sync-drive` for the admin's Google Drive folder.
 
 The same question is never saved twice: two questions in one topic with the same words and picture are the same question, whatever their ids or levels. Questions with the same maths (like 3 + 4 and 4 + 3) share a variant group, and the quiz engine keeps them out of the same quiz.
@@ -94,7 +97,9 @@ A parent owns the account and signs in with Google or a one-time email link. Chi
 5. **Placement check (optional):** 10 questions across the class's topics at Medium and above, with no marks shown. 90% or more suggests the next class and under 40% the one before, when that class has content. The parent chooses.
 6. **Dashboard:** the child lands on their class map. Each profile keeps its own progress, and the app remembers who was playing on this device.
 
-**Grown-ups** lists the children, and lets the parent edit a profile, download a profile's data as JSON, delete a profile with its progress, add a child, change the PIN and sign out.
+**Grown-ups** lists the children, and lets the parent edit a profile, change a child's quiz settings, download a profile's data as JSON, delete a profile with its progress, add a child, change the PIN and sign out.
+
+**Quiz settings:** a parent can set one child's pass mark and the marks off for a wrong first try, higher or lower than the class default, to fit that child. One choice covers all of the child's topics. The pass mark is a percentage of the 68 marks a quiz can give, to the nearest mark (65% is 44 marks, 80% is 54), from 1% to 100%; marks off can be 0 to 4. A child whose parent hasn't chosen follows the class default. The child's dashboard shows the pass mark that child needs, and the quiz counts towards it in marks.
 
 Every quiz is saved as it is played: the play when it starts, each answer as it is given, and the marks and topic progress at the end. Practice rounds are saved too, but never change topic progress.
 
@@ -102,7 +107,7 @@ Every quiz is saved as it is played: the play when it starts, each answer as it 
 
 The page talks to an account backend (`src/accounts/backend.ts`), and the same tests run against both kinds:
 
-- **Demo** (`npm run preview`, and the published preview): pretend sign-in, and everything is kept in the browser's storage. Tester tools on the dashboard reset the demo and add questions; during a quiz they answer right or wrong.
+- **Demo** (`npm run preview`, and the published preview): pretend sign-in, and everything is kept in the browser's storage. Tester tools on the dashboard reset the demo; during a quiz they answer right or wrong. In Grown-ups, **Make me the admin** opens the admin panel, whose review queue starts with five questions that have planted mistakes.
 - **Real app** (`npm run app`): Supabase Auth for sign-in, and the Supabase database for everything else, protected by row-level security. Without the two settings below it builds the demo instead.
 
 ### Setting up sign-in
@@ -119,6 +124,24 @@ The page talks to an account backend (`src/accounts/backend.ts`), and the same t
    ```
 
    Host `dist/app/index.html` on any static host with HTTPS. The publishable key is meant to be public; row-level security is what protects each family's data. Never put a secret or service role key in the app.
+7. **New questions:** build and deploy the server function with the [Supabase CLI](https://supabase.com/docs/guides/functions/deploy):
+
+   ```sh
+   npm run functions
+   npx supabase link --project-ref <project-ref>
+   npx supabase functions deploy new-questions --no-verify-jwt
+   ```
+
+   The function checks the parent's sign-in itself, so it is deployed with `--no-verify-jwt`. Supabase gives it the project URL and the service role key, which it uses to write the question bank; the key never leaves Supabase. Without the function, the button says it couldn't make new questions and quizzes carry on with the bank they have.
+
+## Admin panel
+
+To make someone an admin, add their user id to `public.admins` from the Supabase dashboard. Their Grown-ups page then has **Open the admin panel**, with four tabs:
+
+- **Review queue:** every question that failed a check, with the problems the checks found. The admin approves it as it is, fixes it, or rejects it, and children never see it before it is approved. A fix is checked again before it can be saved (a fix that still fails needs a second tap), and starts the question's live results again. Questions from a CSV are fixed in their Drive file instead, so the next sync keeps the fix. Every decision is recorded with who made it.
+- **Class settings:** each class's default pass mark (65% to start) and marks off (1 to start). Every topic in the class uses them, for every child whose parent hasn't chosen their own.
+- **Level bands:** where each level starts, as the share of children who get a question right first time (L1 85%+, L2 65 to 85%, L3 50 to 65%, L4 under 50%). The four bands move together, so they never leave a gap or overlap.
+- **New questions:** makes questions for any topic, shows how many approved questions each topic has, and lists the latest requests.
 
 ## Database
 
@@ -128,6 +151,7 @@ The Supabase schema lives in `supabase/migrations`:
 - `20261025100100_reference_data.sql`: the 5 UKG topics, the level bands (L1 85%+, L2 65 to 85%, L3 50 to 65%, L4 under 50%) and each topic's defaults (pass mark 44, 1 mark off for a wrong first try).
 - `20261025120000_question_requests.sql`: the log of New questions requests. A family sees only its own requests and the admin sees all; only the server writes it.
 - `20261025130000_accounts.sql`: the parent PIN hash, the fixed onboarding choices for profiles, and practice plays.
+- `20261025150000_admin_panel.sql`: replaces the per-topic settings with one default per class (`class_settings`) and each child's own choice (`profiles.pass_percent` and `wrong_penalty`), and adds `review_question` and `set_level_bands`, which save a review or the four bands in one step and only for an admin.
 
 To apply them to a Supabase project, run the files in name order in the SQL editor, or use the Supabase CLI (`supabase link`, then `supabase db push`). To make someone an admin, add their user id to `public.admins` from the dashboard.
 

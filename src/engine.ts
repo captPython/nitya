@@ -8,12 +8,14 @@ export const MIN_LEVEL: Level = 1;
 
 /** Marks for a right first try, by level: harder questions move the bar further. */
 export const MARKS_BY_LEVEL: Record<Level, number> = { 1: 1, 2: 2, 3: 3, 4: 4 };
-/** Marks taken away for a wrong first try. The total never drops below 0. */
+/** Marks taken away for a wrong first try, unless the topic's settings say otherwise. The total never drops below 0. */
 export const WRONG_PENALTY = 1;
 /**
- * Marks needed to clear a topic. Simulating every right/wrong pattern over 20
- * questions, 44 agrees with the old "80% and 5 hard answers" rule about 95% of
- * the time, so the bar alone now decides.
+ * Marks needed to clear a topic, unless the topic's settings say otherwise (an
+ * admin sets each topic's, and a parent may change it for one child within the
+ * admin's limits). Simulating every right/wrong pattern over 20 questions, 44
+ * agrees with the old "80% and 5 hard answers" rule about 95% of the time, so
+ * the bar alone now decides.
  */
 export const PASS_MARKS = 44;
 
@@ -48,6 +50,9 @@ export function startQuiz(opts: {
   topicId: string;
   attemptNo: number;
   seenBefore?: string[];
+  /** The topic's settings for this child; the defaults when left out. */
+  passMarks?: number;
+  wrongPenalty?: number;
 }): QuizState {
   return {
     classId: opts.classId,
@@ -59,6 +64,8 @@ export function startQuiz(opts: {
     correct: 0,
     hardCorrect: 0,
     marks: 0,
+    passMarks: opts.passMarks ?? PASS_MARKS,
+    wrongPenalty: opts.wrongPenalty ?? WRONG_PENALTY,
     asked: [],
     seenBefore: opts.seenBefore ?? [],
     pendingRetry: null,
@@ -71,7 +78,7 @@ export function isFinished(s: QuizState): boolean {
 }
 
 export function isQualified(s: QuizState): boolean {
-  return s.marks >= PASS_MARKS;
+  return s.marks >= s.passMarks;
 }
 
 /** Accuracy per sub-skill so far, as right / asked. */
@@ -156,7 +163,7 @@ export function answerFirstTry(
 ): { state: QuizState; result: FirstTryResult } {
   if (s.pendingRetry) throw new Error("Finish the hint retry first");
   const right = checkAnswer(q, response);
-  const marksDelta = right ? MARKS_BY_LEVEL[q.level] : 0 - Math.min(WRONG_PENALTY, s.marks);
+  const marksDelta = right ? MARKS_BY_LEVEL[q.level] : 0 - Math.min(s.wrongPenalty, s.marks);
   const next: QuizState = {
     ...s,
     marks: s.marks + marksDelta,
@@ -236,7 +243,7 @@ export function finishQuiz(s: QuizState): QuizOutcome {
   return {
     cleared,
     marks: s.marks,
-    passMarks: PASS_MARKS,
+    passMarks: s.passMarks,
     maxMarks: maxMarks(s.classId),
     correct: s.correct,
     hardCorrect: s.hardCorrect,

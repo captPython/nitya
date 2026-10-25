@@ -109,6 +109,10 @@ export interface QuizState {
   hardCorrect: number;
   /** Level-weighted marks; wrong first tries take marks away. */
   marks: number;
+  /** Marks needed to clear the topic: the admin's default, or the parent's choice for this child. */
+  passMarks: number;
+  /** Marks a wrong first try takes away. */
+  wrongPenalty: number;
   asked: string[];
   seenBefore: string[];
   /** Set while the child is on the hint retry for a question they got wrong. */

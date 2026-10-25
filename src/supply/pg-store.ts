@@ -1,33 +1,8 @@
 import type pg from "pg";
-import type { ClassId, Level, QuestionFormat } from "../types";
+import type { ClassId } from "../types";
 import { planSave, resultOf } from "./plan";
-import type { CheckedQuestion, QuestionRequest, QuestionStore, QuestionSource, SaveResult, SuppliedQuestion, TopicInfo } from "./types";
-
-const COLUMNS = `id, topic_id, sub_skill, level, format, prompt, visual, options, answers, hint, explanation, reason,
-  working, variant_group, source, source_ref, generator_version`;
-
-interface QuestionRow {
-  id: string; topic_id: string; sub_skill: string; level: number; format: string; prompt: string;
-  visual: SuppliedQuestion["visual"] | null; options: string[] | null; answers: string[];
-  hint: string; explanation: string; reason: string; working: SuppliedQuestion["working"] | null;
-  variant_group: string | null; source: string; source_ref: string | null; generator_version: string | null;
-}
-
-/** A database row as a question, leaving out empty fields so it matches the question that was saved. */
-function toQuestion(r: QuestionRow): SuppliedQuestion {
-  return {
-    id: r.id, topicId: r.topic_id, subSkill: r.sub_skill, level: r.level as Level, format: r.format as QuestionFormat,
-    prompt: r.prompt,
-    ...(r.visual ? { visual: r.visual } : {}),
-    ...(r.options ? { options: r.options } : {}),
-    answers: r.answers, hint: r.hint, explanation: r.explanation, reason: r.reason,
-    ...(r.working ? { working: r.working } : {}),
-    ...(r.variant_group ? { variantGroup: r.variant_group } : {}),
-    source: r.source as QuestionSource,
-    ...(r.source_ref ? { sourceRef: r.source_ref } : {}),
-    ...(r.generator_version ? { generatorVersion: r.generator_version } : {}),
-  };
-}
+import { QUESTION_COLUMNS as COLUMNS, toQuestion, type QuestionRow } from "./rows";
+import type { CheckedQuestion, QuestionRequest, QuestionStore, SaveResult, SuppliedQuestion, TopicInfo } from "./types";
 
 const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
 

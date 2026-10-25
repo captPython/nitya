@@ -202,6 +202,21 @@ describe("mastery", () => {
     expect(out.suggestLesson).toBe(true);
   });
 
+  it("uses the child's own pass mark and penalty", () => {
+    const pattern = Array(QUIZ_LENGTH).fill(true);
+    [2, 5].forEach(i => (pattern[i] = false));
+    const start = startQuiz({ classId: "UKG", topicId: topic.id, attemptNo: 1, passMarks: 60, wrongPenalty: 2 });
+    const { s } = playSequence(pattern, start);
+    const usual = playSequence(pattern).s;
+    // Each wrong first try costs 2 instead of 1.
+    expect(s.responses.filter(r => !r.firstTryCorrect).map(r => r.marksDelta)).toEqual([-2, -2]);
+    expect(s.marks).toBe(usual.marks - 2);
+    expect(usual.marks).toBeGreaterThanOrEqual(PASS_MARKS);
+    expect(s.marks).toBeLessThan(60);
+    expect(finishQuiz(usual).cleared).toBe(true);
+    expect(finishQuiz(s)).toMatchObject({ cleared: false, passMarks: 60 });
+  });
+
   it("offers practice mode from the 2nd failed attempt", () => {
     const pattern = Array(QUIZ_LENGTH).fill(false);
     expect(finishQuiz(playSequence(pattern, fresh("UKG", 1)).s).offerPractice).toBe(false);

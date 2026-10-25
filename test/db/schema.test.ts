@@ -90,15 +90,10 @@ describe("reference data", () => {
     ]);
   });
 
-  it("gives every topic a pass mark of 44 and a 1-mark penalty, with parent limits at the defaults", async () => {
-    const { rows } = await db.query("select * from public.topic_settings");
-    expect(rows).toHaveLength(5);
-    for (const r of rows) {
-      expect(r).toMatchObject({
-        pass_marks: 44, pass_marks_min: 44, pass_marks_max: 44,
-        wrong_penalty: 1, wrong_penalty_min: 1, wrong_penalty_max: 1,
-      });
-    }
+  it("gives every class a pass mark of 65% and a 1-mark penalty", async () => {
+    const { rows } = await db.query("select class_id, pass_percent, wrong_penalty from public.class_settings order by class_id");
+    expect(rows.map(r => r.class_id)).toEqual(["LKG", "UKG", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12"]);
+    for (const r of rows) expect(r).toMatchObject({ pass_percent: 65, wrong_penalty: 1 });
   });
 });
 
@@ -261,33 +256,37 @@ describe("families", () => {
 describe("settings", () => {
   let child: string;
   const effective = (parent: string) =>
-    as(db, parent, q => q.query("select * from public.effective_topic_settings($1, $2)", [child, TOPIC]));
+    as(db, parent, q => q.query("select * from public.effective_quiz_settings($1)", [child]));
+  const choose = (parent: string, passPercent: number | null, wrongPenalty: number | null = null) =>
+    as(db, parent, q => q.query("update public.profiles set pass_percent = $2, wrong_penalty = $3 where id = $1", [child, passPercent, wrongPenalty]));
 
   beforeAll(async () => {
     child = await familyWithChild(PARENT_A, "Settings kid");
   });
 
-  it("refuses a parent's pass mark outside the admin's limits", async () => {
-    await expect(as(db, PARENT_A, q =>
-      q.query("insert into public.profile_topic_settings (profile_id, topic_id, pass_marks) values ($1, $2, 40)", [child, TOPIC]),
-    )).rejects.toThrow(/outside the allowed 44 to 44/);
+  it("refuses a choice outside what a quiz allows", async () => {
+    await expect(choose(PARENT_A, 0)).rejects.toThrow("check");
+    await expect(choose(PARENT_A, 101)).rejects.toThrow("check");
+    await expect(choose(PARENT_A, null, 5)).rejects.toThrow("check");
   });
 
-  it("uses the parent's value inside the limits, and clamps it when the admin narrows them", async () => {
-    await as(db, ADMIN, q =>
-      q.query("update public.topic_settings set pass_marks_min = 40, pass_marks_max = 50 where topic_id = $1", [TOPIC]));
-    await as(db, PARENT_A, q =>
-      q.query("insert into public.profile_topic_settings (profile_id, topic_id, pass_marks) values ($1, $2, 48)", [child, TOPIC]));
-    expect((await effective(PARENT_A)).rows).toEqual([{ pass_marks: 48, wrong_penalty: 1 }]);
-
-    await as(db, ADMIN, q =>
-      q.query("update public.topic_settings set pass_marks_min = 44, pass_marks_max = 46 where topic_id = $1", [TOPIC]));
-    expect((await effective(PARENT_A)).rows).toEqual([{ pass_marks: 46, wrong_penalty: 1 }]);
+  it("uses the parent's choice, higher or lower, and the class default otherwise", async () => {
+    expect((await effective(PARENT_A)).rows).toEqual([{ pass_percent: 65, wrong_penalty: 1 }]);
+    await as(db, ADMIN, q => q.query("update public.class_settings set pass_percent = 75 where class_id = 'UKG'"));
+    expect((await effective(PARENT_A)).rows).toEqual([{ pass_percent: 75, wrong_penalty: 1 }]);
+    await choose(PARENT_A, 50, 0);
+    expect((await effective(PARENT_A)).rows).toEqual([{ pass_percent: 50, wrong_penalty: 0 }]);
+    await choose(PARENT_A, 90, null);
+    expect((await effective(PARENT_A)).rows).toEqual([{ pass_percent: 90, wrong_penalty: 1 }]);
+    await as(db, ADMIN, q => q.query("update public.class_settings set pass_percent = 65 where class_id = 'UKG'"));
   });
 
-  it("does not let a parent change the admin defaults", async () => {
-    const res = await as(db, PARENT_A, q => q.query("update public.topic_settings set pass_marks = 45 where topic_id = $1", [TOPIC]));
+  it("does not let a parent change a class default, or another family's child", async () => {
+    const res = await as(db, PARENT_A, q => q.query("update public.class_settings set pass_percent = 70 where class_id = 'UKG'"));
     expect(res.rowCount).toBe(0);
+    const other = await choose(PARENT_B, 90);
+    expect(other.rowCount).toBe(0);
+    await expect(as(db, ADMIN, q => q.query("update public.class_settings set pass_percent = 101 where class_id = 'UKG'"))).rejects.toThrow("check");
   });
 });
 

@@ -3,7 +3,7 @@
 export * from "./types";
 export { fingerprint, generateQuestions, bankQuestions, type GenerateOptions } from "./generate";
 export { checkQuestions, topicInfo } from "./check";
-export { CSV_COLUMNS, parseCsv, parsePicture, parseWorking, parseQuestionCsv, toQuestionCsv, type CsvRowError } from "./csv";
+export { CSV_COLUMNS, parseCsv, parsePicture, parseWorking, parseQuestionCsv, pictureText, toQuestionCsv, workingText, type CsvRowError } from "./csv";
 export { planSave, type SavePlan } from "./plan";
 export { MemoryQuestionStore, type MemoryRow } from "./memory-store";
 export * from "./run";

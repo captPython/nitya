@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ReviewEntry } from "../admin/review";
+import { bandCutsProblem, childSettingsProblem, classSettingsProblems, type ClassSettings } from "../admin/settings";
+import { QUESTION_COLUMNS, toQuestion, toRow as questionRow, type QuestionRow } from "../supply/rows";
 import type { ClassId, Level, TopicState } from "../types";
-import type { Account, AccountBackend } from "./backend";
-import { NotSignedIn } from "./backend";
+import type { CheckReport } from "../validation";
+import type { Account, AccountBackend, NewQuestionsResult } from "./backend";
+import { NotAdmin, NotSignedIn } from "./backend";
 import type { Profile, ProfileDetails } from "./options";
 import type { ProfileData } from "./progress";
 
@@ -36,19 +40,49 @@ const toRow = (d: ProfileDetails) => ({ nickname: d.nickname.trim(), avatar: d.a
 
 /** The result of a Supabase call, or its error as a thrown Error. */
 function must<T>(res: { data: T | null; error: { message: string } | null }): T {
-  if (res.error) throw new Error(res.error.message);
+  if (res.error) {
+    // The one database rule a fix can break, said plainly.
+    if (/content_key/.test(res.error.message)) throw new Error("The bank already has this question.");
+    throw new Error(res.error.message);
+  }
   return res.data as T;
+}
+
+const CLASS_SETTINGS = "class_id, pass_percent, wrong_penalty";
+interface ClassSettingsRow { class_id: ClassId; pass_percent: number; wrong_penalty: number }
+const toClassSettings = (r: ClassSettingsRow): ClassSettings => ({ classId: r.class_id, passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty });
+
+/** Calls the New questions server function (see src/server). */
+export type NewQuestionsCall = (body: { topicId: string; profileId?: string }) => Promise<NewQuestionsResult>;
+
+/** Supabase Edge Functions: the function named `new-questions`, with the parent's sign-in. */
+export function edgeFunction(client: SupabaseClient): NewQuestionsCall {
+  return async body => {
+    const { data, error } = await client.functions.invoke("new-questions", { body });
+    if (error) {
+      // The function's own message, like the daily limit, is in the response.
+      const ctx = (error as { context?: Response }).context;
+      const message = ctx && typeof ctx.json === "function" ? await ctx.json().then(j => j?.error, () => null) : null;
+      throw new Error(message || error.message);
+    }
+    return data as NewQuestionsResult;
+  };
 }
 
 /**
  * The family's account in Nitya's Supabase database. Row-level security
  * decides what each parent can see and change; this only shapes the calls.
  */
-export function supabaseBackend(client: SupabaseClient, auth: AuthPort): AccountBackend {
+export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuestions: NewQuestionsCall = edgeFunction(client)): AccountBackend {
   const userId = async () => {
     const u = await auth.user();
     if (!u) throw new NotSignedIn();
     return u.id;
+  };
+  // Row-level security would only hide rows from anyone else; this says so instead.
+  const requireAdmin = async () => {
+    const id = await userId();
+    if ((must(await client.from("admins").select("user_id").eq("user_id", id)) as unknown[]).length === 0) throw new NotAdmin();
   };
   // The parent row is made on first sign-in; afterwards this does nothing.
   const ensureParent = async (id: string) => {
@@ -63,7 +97,9 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort): Account
       await ensureParent(u.id);
       const parent = must(await client.from("parents").select("pin_hash").eq("id", u.id).single()) as { pin_hash: string | null };
       const consents = must(await client.from("consents").select("consent_version").order("given_at", { ascending: false }).limit(1)) as { consent_version: string }[];
-      return { userId: u.id, email: u.email, consentVersion: consents[0]?.consent_version ?? null, pinHash: parent.pin_hash };
+      // An admin can read their own row in admins; anyone else reads nothing.
+      const admins = must(await client.from("admins").select("user_id").eq("user_id", u.id)) as unknown[];
+      return { userId: u.id, email: u.email, consentVersion: consents[0]?.consent_version ?? null, pinHash: parent.pin_hash, isAdmin: admins.length > 0 };
     },
     signInWithGoogle: () => auth.signInWithGoogle(),
     sendEmailLink: email => auth.sendEmailLink(email.trim().toLowerCase()),
@@ -146,6 +182,76 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort): Account
         rows.map(t => ({ profile_id: profileId, topic_id: t.topicId, state: t.state, attempts: t.attempts, best_marks: t.bestMarks })),
         { onConflict: "profile_id,topic_id" },
       ));
+    },
+
+    async questions(topicId) {
+      const rows = must(await client.from("questions").select(QUESTION_COLUMNS).eq("topic_id", topicId).eq("status", "approved").order("id")) as unknown as QuestionRow[];
+      return rows.map(toQuestion);
+    },
+    newQuestions: (topicId, profileId) => newQuestions(profileId ? { topicId, profileId } : { topicId }),
+    async classSettings() {
+      return (must(await client.from("class_settings").select(CLASS_SETTINGS).order("class_id")) as ClassSettingsRow[]).map(toClassSettings);
+    },
+    async childSettings(profileId) {
+      const r = must(await client.from("profiles").select("pass_percent, wrong_penalty").eq("id", profileId).maybeSingle()) as
+        { pass_percent: number | null; wrong_penalty: number | null } | null;
+      if (!r) throw new Error("That profile isn't in this account.");
+      return { passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty };
+    },
+    async saveChildSettings(profileId, c) {
+      // The database checks this too; checking first gives the parent a plain message.
+      const problem = childSettingsProblem(c);
+      if (problem) throw new Error(problem);
+      const rows = must(await client.from("profiles").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty })
+        .eq("id", profileId).select("id")) as unknown[];
+      // Row-level security hides other families' children, so nothing changes.
+      if (rows.length !== 1) throw new Error("That profile isn't in this account.");
+    },
+
+    async reviewQueue() {
+      await requireAdmin();
+      const rows = must(await client.from("questions")
+        .select(`${QUESTION_COLUMNS}, question_checks(report, checked_at)`)
+        .eq("status", "in_review").order("id")
+        .order("checked_at", { referencedTable: "question_checks", ascending: false })
+        .limit(1, { referencedTable: "question_checks" })) as unknown as (QuestionRow & { question_checks: { report: CheckReport; checked_at: string }[] })[];
+      return rows.map((r): ReviewEntry => ({
+        question: toQuestion(r), report: r.question_checks[0]?.report ?? null, checkedAt: r.question_checks[0]?.checked_at ?? null,
+      }));
+    },
+    async reviewQuestion(questionId, review) {
+      const fixed = review.decision === "fixed" ? questionRow(review.question) : null;
+      must(await client.rpc("review_question", {
+        p_question_id: questionId, p_decision: review.decision, p_note: review.note ?? null,
+        p_fixed: fixed, p_report: review.decision === "fixed" ? review.report : null,
+      }));
+    },
+    async saveClassSettings(c) {
+      const problems = classSettingsProblems(c);
+      if (problems.length) throw new Error(problems.join(" "));
+      const rows = must(await client.from("class_settings").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty })
+        .eq("class_id", c.classId).select("class_id")) as unknown[];
+      // Row-level security hides the row from anyone but an admin, so nothing changes.
+      if (rows.length !== 1) throw new NotAdmin();
+    },
+    async levelBands() {
+      const rows = must(await client.from("level_bands").select("level, min_rate, max_rate").order("level")) as { level: Level; min_rate: number | string; max_rate: number | string }[];
+      return rows.map(r => ({ level: r.level, minRate: Number(r.min_rate), maxRate: Number(r.max_rate) }));
+    },
+    async saveLevelBands(cuts) {
+      const problem = bandCutsProblem(cuts);
+      if (problem) throw new Error(problem);
+      must(await client.rpc("set_level_bands", { p_l1: cuts.l1 / 100, p_l2: cuts.l2 / 100, p_l3: cuts.l3 / 100 }));
+    },
+    async questionRequests(limit = 20) {
+      await requireAdmin();
+      const rows = must(await client.from("question_requests").select("topic_id, requested_at, profile_id, added, sent_to_review")
+        .order("requested_at", { ascending: false }).limit(limit)) as
+        { topic_id: string; requested_at: string; profile_id: string | null; added: number; sent_to_review: number }[];
+      return rows.map(r => ({
+        topicId: r.topic_id, requestedAt: r.requested_at, by: r.profile_id ? "child" as const : "grown-up" as const,
+        added: r.added, sentToReview: r.sent_to_review,
+      }));
     },
   };
 }

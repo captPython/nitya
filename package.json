@@ -10,7 +10,8 @@
     "typecheck": "tsc",
     "preview": "node preview/build.mjs",
     "questions": "node scripts/run.mjs scripts/questions.ts",
-    "app": "node preview/build.mjs --app"
+    "app": "node preview/build.mjs --app",
+    "functions": "node scripts/build-functions.mjs"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",

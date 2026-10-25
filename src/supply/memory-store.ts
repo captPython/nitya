@@ -1,10 +1,12 @@
+import type { Review } from "../admin/review";
+import { contentKey } from "../content/gen";
 import type { CheckReport } from "../validation";
 import { planSave, resultOf } from "./plan";
 import type { CheckedQuestion, QuestionRequest, QuestionStore, SaveResult, SuppliedQuestion, TopicInfo } from "./types";
 
 export interface MemoryRow {
   question: SuppliedQuestion;
-  status: CheckedQuestion["status"];
+  status: CheckedQuestion["status"] | "rejected";
   /** Every check record, newest last. */
   checks: CheckReport[];
   timesShown: number;
@@ -38,4 +40,25 @@ export class MemoryQuestionStore implements QuestionStore {
   }
 
   async logRequest(request: QuestionRequest) { this.requests.push(request); }
+
+  /** The admin's decision on a question in the review queue, with the database's rules. */
+  review(questionId: string, review: Review) {
+    const row = this.rows.get(questionId);
+    if (!row) throw new Error(`There is no question ${questionId}.`);
+    if (row.status !== "in_review") throw new Error("This question was already reviewed.");
+    if (review.decision === "fixed") {
+      if (row.question.source === "csv") throw new Error("Fix CSV questions in the Drive file, so the next sync keeps the fix.");
+      const q = review.question;
+      const key = `${q.topicId}|${contentKey(q)}`;
+      for (const other of this.rows.values()) {
+        if (other !== row && `${other.question.topicId}|${contentKey(other.question)}` === key) {
+          throw new Error(`The bank already has this question (${other.question.id}).`);
+        }
+      }
+      Object.assign(row, { question: { ...q, id: row.question.id, topicId: row.question.topicId }, status: "approved", timesShown: 0, firstTryCorrect: 0 });
+      row.checks.push(review.report);
+    } else {
+      row.status = review.decision;
+    }
+  }
 }

@@ -18,6 +18,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run preview
+      - run: npm run functions
 
   db:
     runs-on: ubuntu-latest

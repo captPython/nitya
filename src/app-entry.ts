@@ -1,10 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { browserStorage } from "./accounts/browser-storage";
-import { localBackend } from "./accounts/local-backend";
+import { DEMO_KEY, demoBankKey, localBackend } from "./accounts/local-backend";
 import { supabaseAuth, supabaseBackend } from "./accounts/supabase-backend";
 
 export * from "./ui-exports";
-export { browserStorage };
+export { browserStorage, DEMO_KEY, demoBankKey };
 
 // Set at build time from NITYA_SUPABASE_URL and NITYA_SUPABASE_KEY (see README).
 declare const __SUPABASE_URL__: string;
