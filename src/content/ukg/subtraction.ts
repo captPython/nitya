@@ -1,4 +1,4 @@
-import type { TopicContent } from "../../types";
+import type { Level, TopicContent } from "../../types";
 import { arith, buildBank, dots, int, NAMES, numOptions, pick, shuffle, sub, THINGS, type Template } from "../gen";
 
 const ID = "ukg-subtraction-10";
@@ -175,6 +175,14 @@ const marbles: Template = r => {
   };
 };
 
+const SEED = 505;
+const TEMPLATES: Record<Level, Template[]> = {
+  1: [flyAway, minusWithDots],
+  2: [countBack, eatStory, hopBack],
+  3: [howManyGone, twoStep, leavesMore],
+  4: [whoAmI, whichGives, marbles],
+};
+
 export const SUBTRACTION: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 5, title: "Taking away with objects up to 10" },
   lesson: [
@@ -185,12 +193,8 @@ export const SUBTRACTION: TopicContent = {
   ],
   tryIt: { prompt: "4 apples. 1 is eaten. How many are left?", visual: dots({ count: 4, color: "orange", crossed: 1 }),
     options: ["2", "3", "4"], answer: "3", praise: "Yes! 4 take away 1 leaves 3.", help: "Count the dots that are not crossed out: 1, 2, 3." },
-  bank: buildBank(ID, 505, {
-    1: [flyAway, minusWithDots],
-    2: [countBack, eatStory, hopBack],
-    3: [howManyGone, twoStep, leavesMore],
-    4: [whoAmI, whichGives, marbles],
-  }),
+  generator: { seed: SEED, templates: TEMPLATES },
+  bank: buildBank(ID, SEED, TEMPLATES),
   subSkillNames: {
     "take-away-objects": "Taking away objects", "count-back": "Counting back", "word-problem": "Story take-aways",
     "how-many-taken": "Finding how many went", "two-step": "Two take-aways", "compare-differences": "Comparing take-aways",

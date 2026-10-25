@@ -96,6 +96,24 @@ describe("question difficulty matches the level shown", () => {
   });
 });
 
+describe("questions with the same maths", () => {
+  const q = (id: string, group: string, level: Level = 1): Question => ({
+    id, topicId: topic.id, subSkill: "count-on", level, format: "tap-picture", prompt: id, options: ["1", "2"],
+    answers: ["1"], hint: "h", explanation: "1", reason: "1", variantGroup: group,
+  });
+
+  it("keeps 3 + 4 and 4 + 3 out of one quiz while the level has other maths", () => {
+    const twins = [q("3 + 4", "a"), q("4 + 3", "a"), q("2 + 5", "b")];
+    const s = { ...fresh(), asked: ["3 + 4"] };
+    for (let i = 0; i < 20; i++) expect(nextQuestion(s, twins, () => i / 20).id).toBe("2 + 5");
+  });
+
+  it("repeats the maths at the same level rather than jump to a harder one", () => {
+    const twins = [q("3 + 4", "a"), q("4 + 3", "a"), q("hard", "c", 2)];
+    expect(nextQuestion({ ...fresh(), asked: ["3 + 4"] }, twins).id).toBe("4 + 3");
+  });
+});
+
 describe("marks", () => {
   it("gives marks by level and takes 1 away for a wrong first try", () => {
     const { s } = playSequence([true, true, true, false]);

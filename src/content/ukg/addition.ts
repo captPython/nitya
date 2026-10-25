@@ -1,4 +1,4 @@
-import type { TopicContent } from "../../types";
+import type { Level, TopicContent } from "../../types";
 import { add, arith, buildBank, dots, int, NAMES, numOptions, pick, shuffle, THINGS, type Template } from "../gen";
 
 const ID = "ukg-addition-10";
@@ -196,6 +196,14 @@ const pickBags: Template = r => {
   };
 };
 
+const SEED = 404;
+const TEMPLATES: Record<Level, Template[]> = {
+  1: [countAll, sumWithDots],
+  2: [countOn, story, frogHops],
+  3: [threeAddends, hiddenDots, compareSums],
+  4: [makeTen, whoAmI, balance, pickBags],
+};
+
 export const ADDITION: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 4, title: "Adding with objects up to 10" },
   lesson: [
@@ -206,12 +214,8 @@ export const ADDITION: TopicContent = {
   ],
   tryIt: { prompt: "3 ducks and 2 more ducks. How many ducks?", visual: dots({ count: 3, color: "blue" }, { count: 2, color: "orange" }),
     options: ["4", "5", "6"], answer: "5", praise: "You got it! 3 ducks and 2 more make 5.", help: "Say 3, then count on: 4, 5." },
-  bank: buildBank(ID, 404, {
-    1: [countAll, sumWithDots],
-    2: [countOn, story, frogHops],
-    3: [threeAddends, hiddenDots, compareSums],
-    4: [makeTen, whoAmI, balance, pickBags],
-  }),
+  generator: { seed: SEED, templates: TEMPLATES },
+  bank: buildBank(ID, SEED, TEMPLATES),
   subSkillNames: {
     "count-all": "Counting all", "count-on": "Counting on", "word-problem": "Story sums", "add-three": "Adding three numbers",
     "missing-addend": "Finding the missing number", "compare-sums": "Comparing sums", "make-ten": "Making 10", "make-a-number": "Making a number",

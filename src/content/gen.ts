@@ -63,9 +63,68 @@ export type Template = (r: Rng) => Draft;
 
 export const PER_LEVEL = 20;
 
+/** Bumped whenever a template changes how it builds questions. */
+export const GENERATOR_VERSION = "1";
+
+/** JSON with keys in a fixed order, so the same picture always gives the same text. */
+export function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : 1));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/** A short, stable hash of some text, as 16 hex digits (two 32-bit FNV-1a variants). */
+export function shortHash(text: string): string {
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    h1 = Math.imul(h1 ^ text.charCodeAt(i), 16777619);
+    h2 = Math.imul(h2 ^ text.charCodeAt(i), 2246822519);
+  }
+  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+}
+
+/** Two questions with the same key are the same question: same words, same picture. */
+export const contentKey = (q: { prompt: string; visual?: Visual }) => `${q.prompt}|${stableJson(q.visual ?? null)}`;
+
+/** Writes the maths of an expression with sums in a fixed order, so 3 + 4 and 4 + 3 read the same. */
+function canonical(expr: Expr, visual: Visual | undefined): string {
+  if (typeof expr === "number" || expr === "x") return String(expr);
+  if ("dots" in expr) {
+    const g = visual?.groups[expr.dots];
+    return g ? String(g.count - (g.crossed ?? 0)) : "?";
+  }
+  const args = expr.args.map(a => canonical(a, visual));
+  return expr.op === "+" ? `(${[...args].sort().join("+")})` : `(${args.join("-")})`;
+}
+
 /**
- * Builds a fixed bank from templates: PER_LEVEL unique questions for each
- * level, taking templates in turn so every level mixes its question types.
+ * The variant group for a question: questions with the same maths share it,
+ * so the engine never puts them in the same quiz.
+ */
+export function variantGroup(topicId: string, working: Working, visual?: Visual): string {
+  const items = (xs: { label: string; expr: Expr }[]) => xs.map(i => canonical(i.expr, visual)).sort().join(",");
+  let maths: string;
+  switch (working.kind) {
+    case "arith": maths = canonical(working.expr, visual); break;
+    case "count-dots": maths = (visual?.groups ?? []).map(g => `${g.count}-${g.crossed ?? 0}`).sort().join(","); break;
+    case "missing": maths = [canonical(working.lhs, visual), canonical(working.rhs, visual)].sort().join("="); break;
+    case "sequence": maths = working.terms.map(t => t ?? "_").join(","); break;
+    case "between": maths = `${working.above}<x<${working.below}`; break;
+    case "extreme": maths = `${working.of}:${items(working.items)}`; break;
+    case "equals": maths = `${working.target}:${items(working.items)}`; break;
+    case "order": maths = `${working.direction}:${[...working.values].sort((a, b) => a - b).join(",")}`; break;
+    case "number-word": maths = working.word.toLowerCase(); break;
+  }
+  return `${topicId}:${working.kind}:${maths}`;
+}
+
+/**
+ * Builds a fixed bank from templates: PER_LEVEL questions for each level, none
+ * repeated anywhere in the topic, taking templates in turn so every level
+ * mixes its question types.
  */
 export function buildBank(
   topicId: string,
@@ -75,17 +134,21 @@ export function buildBank(
 ): Question[] {
   const r = mulberry32(seed);
   const bank: Question[] = [];
+  // One set for the whole topic: the same question can't sit at two levels.
+  const seen = new Set<string>();
   for (const level of [1, 2, 3, 4] as Level[]) {
-    const seen = new Set<string>();
     const list = templates[level];
     let n = 0;
     for (let tries = 0; n < perLevel && tries < perLevel * 200; tries++) {
       const d = list[tries % list.length](r);
-      const key = d.prompt + "|" + JSON.stringify(d.visual ?? null);
+      const key = contentKey(d);
       if (seen.has(key)) continue;
       seen.add(key);
       n += 1;
-      bank.push({ ...d, id: `${topicId}-L${level}-${String(n).padStart(2, "0")}`, topicId, level });
+      bank.push({
+        ...d, id: `${topicId}-L${level}-${String(n).padStart(2, "0")}`, topicId, level,
+        variantGroup: variantGroup(topicId, d.working, d.visual),
+      });
     }
     if (n < perLevel) throw new Error(`${topicId} L${level}: only ${n} unique questions`);
   }
