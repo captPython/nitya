@@ -219,6 +219,9 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 .problems { margin: 0; padding: 10px 14px 10px 32px; border-radius: 14px; background: var(--coral-soft); display: grid; gap: 4px; font-size: 0.95rem; }
 .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .nums label { display: grid; gap: 4px; font-size: 0.85rem; }
+.limits { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.limits legend { padding: 0; margin-bottom: 4px; font-weight: 700; }
+.limits label { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 12px; align-items: center; font-weight: 400; }
 input[type="number"], select {
   font: inherit; font-size: 1.05rem; font-weight: 400; min-height: 48px; padding: 0 12px; border-radius: 12px;
   border: 2px solid var(--line); background: var(--card); color: var(--ink); width: 100%; min-width: 0;

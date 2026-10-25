@@ -640,12 +640,16 @@ function renderAdmin() {
       ? `<p class="muted">${app.queue.length} ${app.queue.length === 1 ? "question failed" : "questions failed"} a check. Children never see a question until it is approved.</p>${app.queue.map(reviewCard).join("")}`
       : `<p class="muted">Nothing to review. Questions that fail a check wait here.</p>`;
   } else if (app.tab === "topics") {
-    const field = (t, f, label) => `<label>${label}<input type="number" inputmode="numeric" data-topic="${t.topicId}" data-f="${f}" value="${t[f]}"></label>`;
-    body = `<p class="muted">Each topic's pass mark and the marks off for a wrong first try, and how far a parent may change them for one child.</p>
+    const field = (t, f, label) => `<label><span>${label}</span><input type="number" inputmode="numeric" data-topic="${t.topicId}" data-f="${f}" value="${t[f]}"></label>`;
+    // One group per setting: the default every child gets, then the range a parent can choose from in Quiz settings.
+    const group = (t, legend, f) => `<fieldset class="limits"><legend>${legend}</legend>
+      ${field(t, f, "Default for every child")}${field(t, `${f}Min`, "Lowest a parent can choose")}${field(t, `${f}Max`, "Highest a parent can choose")}</fieldset>`;
+    body = `<p class="muted">For each topic, the default every child gets, and the lowest and highest a parent can choose for their own child in Quiz settings.</p>
       ${app.topics.filter(t => byId(t.topicId)).map(t => `<div class="setting">
         <h3>${esc(topicTitle(t.topicId))} <small class="muted small">${esc(className(byId(t.topicId).topic.classId))}</small></h3>
-        <div class="nums">${field(t, "passMarks", "Pass mark")}${field(t, "passMarksMin", "Parents from")}${field(t, "passMarksMax", "Parents up to")}</div>
-        <div class="nums">${field(t, "wrongPenalty", "Marks off")}${field(t, "wrongPenaltyMin", "Parents from")}${field(t, "wrongPenaltyMax", "Parents up to")}</div>
+        ${group(t, `Pass mark, out of ${M.maxMarks(byId(t.topicId).topic.classId)}`, "passMarks")}
+        ${group(t, "Marks off for a wrong first try", "wrongPenalty")}
+        <p class="small muted">Saved now: every child needs ${t.passMarks}, and a parent can choose ${t.passMarksMin} to ${t.passMarksMax}. A wrong first try takes off ${t.wrongPenalty}, and a parent can choose ${t.wrongPenaltyMin} to ${t.wrongPenaltyMax}.</p>
         ${app.topicMsg?.topicId === t.topicId ? `<p class="${app.topicMsg.error ? "error" : "note"}" role="status">${esc(app.topicMsg.text)}</p>` : ""}
         <div class="row"><button class="ghost" type="button" data-save="${t.topicId}">Save</button></div></div>`).join("")}`;
   } else if (app.tab === "bands") {
