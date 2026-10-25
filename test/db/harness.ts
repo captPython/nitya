@@ -10,7 +10,7 @@ function urlFor(base: string, database: string): string {
 }
 
 /** A new, empty database with the Supabase stub and every migration applied. */
-export async function createTestDb(): Promise<{ db: pg.Client; drop: () => Promise<void> }> {
+export async function createTestDb(): Promise<{ db: pg.Client; url: string; drop: () => Promise<void> }> {
   const base = process.env.DATABASE_URL;
   if (!base) throw new Error("Set DATABASE_URL to a Postgres server where the tests may create databases.");
   const name = `nitya_test_${process.pid}_${Date.now()}`;
@@ -20,7 +20,8 @@ export async function createTestDb(): Promise<{ db: pg.Client; drop: () => Promi
   await root.query(`create database ${name}`);
   await root.end();
 
-  const db = new pg.Client({ connectionString: urlFor(base, name) });
+  const url = urlFor(base, name);
+  const db = new pg.Client({ connectionString: url });
   await db.connect();
   await db.query(readFileSync("test/db/supabase-stub.sql", "utf8"));
   for (const file of readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort()) {
@@ -29,11 +30,12 @@ export async function createTestDb(): Promise<{ db: pg.Client; drop: () => Promi
 
   return {
     db,
+    url,
     async drop() {
       await db.end();
       const cleanup = new pg.Client({ connectionString: base });
       await cleanup.connect();
-      await cleanup.query(`drop database ${name}`);
+      await cleanup.query(`drop database ${name} with (force)`);
       await cleanup.end();
     },
   };
