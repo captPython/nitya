@@ -486,6 +486,18 @@ function renderPlacementResult() {
 }
 
 /* ---------- grown-ups ---------- */
+const icon = d => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  settings: icon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`),
+  edit: icon(`<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>`),
+  download: icon(`<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>`),
+  trash: icon(`<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>`),
+  plus: icon(`<path d="M12 5v14M5 12h14"/>`),
+  lock: icon(`<rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>`),
+  out: icon(`<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/>`),
+  arrow: icon(`<path d="M5 12h14M13 6l6 6-6 6"/>`),
+};
+
 function download(name, value) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
   const a = Object.assign(document.createElement("a"), { href: url, download: name });
@@ -505,20 +517,22 @@ function renderGrownups() {
       <span class="emoji" aria-hidden="true">${M.avatarEmoji(p.avatar)}</span>
       <div><b>${esc(p.nickname)}</b><div class="small muted">${esc(className(p.classId))} · ${esc(M.BOARDS.find(b => b.id === p.board)?.name ?? p.board)} · ${esc(M.LANGUAGES.find(l => l.id === p.language)?.name ?? p.language)}</div></div>
       <div class="row">
-        <button class="ghost" type="button" data-edit="${p.id}">Edit</button>
-        <button class="ghost" type="button" data-settings="${p.id}">Settings</button>
-        <button class="ghost" type="button" data-download="${p.id}">Download data</button>
-        <button class="ghost" type="button" data-delete="${p.id}">${app.confirmDelete === p.id ? `Tap again to delete ${esc(p.nickname)}` : "Delete"}</button>
-      </div></div>`).join("")}</div>
+        <button class="ghost tonal" type="button" data-settings="${p.id}">${ICONS.settings}Settings</button>
+        <button class="ghost" type="button" data-edit="${p.id}">${ICONS.edit}Edit<span class="roomy"> profile</span></button>
+      </div>
+      <div class="row member-more">
+        <button class="ghost quiet" type="button" data-download="${p.id}">${ICONS.download}Download<span class="roomy"> data</span></button>
+        <button class="ghost quiet danger ${app.confirmDelete === p.id ? "sure" : ""}" type="button" data-delete="${p.id}">${ICONS.trash}${app.confirmDelete === p.id ? `Tap again to delete ${esc(p.nickname)}` : "Delete"}</button>
+      </div></div>`).join("")}
+      <button class="ghost addkid" type="button" id="add">${ICONS.plus}Add a child</button></div>
     ${app.exported ? `<details><summary>Show ${esc(app.exported.name)}'s data</summary><pre class="data">${esc(JSON.stringify(app.exported.value, null, 2))}</pre></details>` : ""}
-    <div class="row"><button class="ghost" type="button" id="add">Add a child</button>
-      <button class="ghost" type="button" id="pin">Change the PIN</button>
-      <button class="ghost" type="button" id="signout">Sign out</button></div>
     ${account.isAdmin
       ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each class's default pass mark and marks off, and set the level bands.</p>
-          <div class="row"><button class="ghost" type="button" id="admin">Open the admin panel</button></div></div>`
+          <div class="row"><button class="ghost tonal" type="button" id="admin">Open the admin panel${ICONS.arrow}</button></div></div>`
       : DEMO ? `<div class="panel"><span class="label">Admin (demo)</span><p class="small muted">In the real app only Nitya's admin sees the admin panel. In the demo you can try it.</p>
-          <div class="row"><button class="ghost" type="button" id="demoadmin">Make me the admin</button></div></div>` : ""}
+          <div class="row"><button class="ghost tonal" type="button" id="demoadmin">Make me the admin${ICONS.arrow}</button></div></div>` : ""}
+    <div class="row account"><button class="ghost quiet" type="button" id="pin">${ICONS.lock}Change the PIN</button>
+      <button class="ghost quiet" type="button" id="signout">${ICONS.out}Sign out</button></div>
     <div class="row"><button class="btn primary" type="button" id="done">${child ? `Back to ${esc(child.nickname)}` : "Choose a child"}</button></div>
   </div>`;
   screen.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(profiles.find(p => p.id === b.dataset.edit)));
@@ -594,8 +608,8 @@ function renderChildSettings() {
       <p class="small muted">${percent}% is ${eff.passMarks} of the ${MAX} marks a quiz can give. ${cls}'s default is ${def.passPercent}% to pass and ${def.wrongPenalty} ${def.wrongPenalty === 1 ? "mark" : "marks"} off for a wrong first try. A pass mark can be ${lim.passPercent.min}% to ${lim.passPercent.max}%, and marks off ${lim.wrongPenalty.min} to ${lim.wrongPenalty.max}.</p>
       ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
       ${errorLine()}
-      <div class="row"><button class="ghost" type="button" id="savemine">Save</button>
-        ${changed ? `<button class="ghost" type="button" id="usedefault">Use ${cls}'s default</button>` : ""}</div>
+      <div class="row"><button class="ghost tonal" type="button" id="savemine">Save</button>
+        ${changed ? `<button class="ghost quiet" type="button" id="usedefault">Use ${cls}'s default</button>` : ""}</div>
     </div>
     <div class="setting">
       <h3>How Nitya looks for ${name}</h3>

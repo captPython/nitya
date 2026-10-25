@@ -135,6 +135,20 @@ b, strong { font-weight: var(--body-strong); }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
 }
 .ghost svg { flex: none; }
+.ghost:hover { border-color: var(--blue); }
+[data-look="focus"] .ghost { font-weight: 500; box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+/* Button weights for grown-up screens: tonal for the main action of a card, quiet for the rest, red only for deleting */
+.ghost.tonal { background: var(--blue-soft); border-color: transparent; color: var(--blue); font-weight: 600; box-shadow: none; }
+.ghost.tonal:hover { border-color: var(--blue-mid); }
+.ghost.quiet { background: none; border-color: transparent; color: var(--blue); box-shadow: none; padding: 0 10px; }
+.ghost.quiet:hover { background: var(--blue-soft); }
+.ghost.danger { color: var(--coral); }
+.ghost.danger:hover, .ghost.danger.sure { background: var(--coral-soft); }
+.ghost.danger.sure { border-color: var(--coral-line); font-weight: 600; }
+.addkid { width: 100%; min-height: 56px; background: none; border: 2px dashed var(--line); color: var(--blue); box-shadow: none; font-weight: 600; }
+.addkid:hover { background: var(--blue-soft); }
+.member-more { border-top: 1px solid var(--line-soft); padding-top: 6px; justify-content: space-between; }
+.account { justify-content: space-between; border-top: 1px solid var(--line-soft); padding-top: 10px; }
 :where(.btn, .ghost, .chipbtn, .linkbtn):focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
 
 /* Answer options: big tiles in the playful look, full-width rows with A/B/C keys in the clean one */
@@ -324,8 +338,18 @@ input:focus-visible, select:focus-visible { outline: 3px solid var(--ring); outl
 .kid .who .emoji { width: 52px; height: 52px; border-radius: 50%; background: var(--card); display: grid; place-items: center; font-size: 1.9rem; box-shadow: var(--lift); }
 .who b { font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.4rem; }
 .family { display: grid; gap: 10px; }
-.member { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; align-items: center; padding: 12px 14px; border: var(--bw-ghost) solid var(--line); border-radius: 16px; }
+.member { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 12px; align-items: center; padding: 14px 16px 8px; border: var(--bw-ghost) solid var(--line); border-radius: 16px; }
 .member .row { grid-column: 1 / -1; }
+/* On phones each pair of buttons shares one line, and a pair that can't fit stacks full width */
+@media (max-width: 520px) {
+  .member { padding: 12px 12px 6px; }
+  .member .row { gap: 8px; }
+  .member .row > .ghost { gap: 6px; }
+  .member .row > .ghost:not(.quiet) { flex: 1 1 auto; padding: 0 12px; }
+  .member-more .ghost.quiet { padding: 0 8px; }
+}
+/* The longer half of a label, left out when the screen is very narrow */
+@media (max-width: 380px) { .roomy { display: none; } }
 .banner { background: var(--coral-soft); border-radius: 14px; padding: 10px 14px; font-weight: var(--body-strong); }
 pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-radius: 12px; padding: 12px; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; }
 @media (max-width: 420px) { .choices.avatars { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
