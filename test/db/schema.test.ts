@@ -288,6 +288,20 @@ describe("settings", () => {
     expect(other.rowCount).toBe(0);
     await expect(as(db, ADMIN, q => q.query("update public.class_settings set pass_percent = 101 where class_id = 'UKG'"))).rejects.toThrow("check");
   });
+
+  it("keeps a parent's choice of look for their own child, playful or clean", async () => {
+    const look = (parent: string, value: string | null) =>
+      as(db, parent, q => q.query("update public.profiles set look = $2 where id = $1", [child, value]));
+    const saved = async () => (await db.query("select look from public.profiles where id = $1", [child])).rows[0].look;
+    expect(await saved()).toBeNull();
+    await look(PARENT_A, "focus");
+    expect(await saved()).toBe("focus");
+    await expect(look(PARENT_A, "neon")).rejects.toThrow("check");
+    expect((await look(PARENT_B, "play")).rowCount).toBe(0);
+    expect(await saved()).toBe("focus");
+    await look(PARENT_A, null);
+    expect(await saved()).toBeNull();
+  });
 });
 
 describe("quiz answers", () => {

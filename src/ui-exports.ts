@@ -12,6 +12,7 @@ export { summarize, emptyProfileData } from "./accounts/progress";
 export {
   defaultClassSettings, effectiveSettings, classSettingsProblems, childSettingsProblem, QUIZ_LIMITS, PASS_PERCENT, passMarksFor, cutsOf, bandsOf, bandCutsProblem,
 } from "./admin/settings";
+export { LOOKS, classLook, lookFor } from "./looks";
 export { applyEdits, editsOf, recheck, canFixHere } from "./admin/review";
 export { reportProblems } from "./supply/run";
 export { NEW_QUESTIONS_PER_DAY } from "./server/new-questions";

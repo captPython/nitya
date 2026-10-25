@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ReviewEntry } from "../admin/review";
 import { bandCutsProblem, childSettingsProblem, classSettingsProblems, type ClassSettings } from "../admin/settings";
 import { QUESTION_COLUMNS, toQuestion, toRow as questionRow, type QuestionRow } from "../supply/rows";
+import type { Look } from "../looks";
 import type { ClassId, Level, TopicState } from "../types";
 import type { CheckReport } from "../validation";
 import type { Account, AccountBackend, NewQuestionsResult } from "./backend";
@@ -193,16 +194,16 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuest
       return (must(await client.from("class_settings").select(CLASS_SETTINGS).order("class_id")) as ClassSettingsRow[]).map(toClassSettings);
     },
     async childSettings(profileId) {
-      const r = must(await client.from("profiles").select("pass_percent, wrong_penalty").eq("id", profileId).maybeSingle()) as
-        { pass_percent: number | null; wrong_penalty: number | null } | null;
+      const r = must(await client.from("profiles").select("pass_percent, wrong_penalty, look").eq("id", profileId).maybeSingle()) as
+        { pass_percent: number | null; wrong_penalty: number | null; look: Look | null } | null;
       if (!r) throw new Error("That profile isn't in this account.");
-      return { passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty };
+      return { passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty, look: r.look };
     },
     async saveChildSettings(profileId, c) {
       // The database checks this too; checking first gives the parent a plain message.
       const problem = childSettingsProblem(c);
       if (problem) throw new Error(problem);
-      const rows = must(await client.from("profiles").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty })
+      const rows = must(await client.from("profiles").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty, look: c.look })
         .eq("id", profileId).select("id")) as unknown[];
       // Row-level security hides other families' children, so nothing changes.
       if (rows.length !== 1) throw new Error("That profile isn't in this account.");
