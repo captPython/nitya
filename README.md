@@ -140,6 +140,7 @@ The page talks to an account backend (`src/accounts/backend.ts`), and the same t
    npm run functions
    npx supabase link --project-ref <project-ref>
    npx supabase functions deploy new-questions --no-verify-jwt
+   npx supabase functions deploy family-questions --no-verify-jwt
    ```
 
    The function checks the parent's sign-in itself, so it is deployed with `--no-verify-jwt`. Supabase gives it the project URL and the service role key, which it uses to write the question bank; the key never leaves Supabase. Without the function, the button says it couldn't make new questions and quizzes carry on with the bank they have.
