@@ -1,7 +1,8 @@
 import type { ClassId, Question } from "../types";
 import type { CheckReport } from "../validation";
 
-export type QuestionSource = "template" | "csv" | "website";
+/** "upload" is a family's own question from the question template. */
+export type QuestionSource = "template" | "csv" | "website" | "upload";
 
 /** A question on its way into the bank, with where it came from. */
 export interface SuppliedQuestion extends Question {

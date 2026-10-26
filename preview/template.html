@@ -470,7 +470,7 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 /* A link inside a sentence keeps a 44px tap area without opening a gap in the lines around it */
 p > .linkbtn { min-height: 0; padding-block: 12px; margin-block: -12px; vertical-align: baseline; }
 .settings { display: grid; gap: 12px; }
-.setting { border: var(--bw-ghost) solid var(--line); border-radius: 18px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.setting { border: var(--bw-ghost) solid var(--line); border-radius: 18px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .setline { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .stepper { display: inline-flex; align-items: center; gap: 10px; }
 .stepper .ghost { min-width: 56px; min-height: 52px; padding: 0; font-size: 1.5rem; }
@@ -494,6 +494,13 @@ p > .linkbtn { min-height: 0; padding-block: 12px; margin-block: -12px; vertical
 .optlist span.anskey.bad { border-color: var(--coral-line); background: var(--coral-soft); color: var(--coral); }
 .optlist span.anskey.unchecked, .optlist span.repeat { border-color: var(--hint-ink); background: var(--hint-bg); color: var(--hint-ink); }
 .problems { margin: 0; padding: 10px 14px 10px 32px; border-radius: 14px; background: var(--coral-soft); display: grid; gap: 4px; font-size: 0.95rem; }
+/* A family's own questions: the file picker, the upload's preview, and a tick box's small print. */
+.filepick { display: grid; gap: 6px; margin-top: 12px; }
+.filepick input[type=file] { width: 100%; box-sizing: border-box; font: inherit; min-height: 48px; padding: 10px; border: var(--bw-ghost) dashed var(--line); border-radius: 14px; background: var(--card); color: var(--ink); max-width: 100%; }
+.filepick input[type=file]::file-selector-button { font: inherit; font-weight: var(--body-strong); margin-right: 12px; padding: 8px 14px; border-radius: 12px; border: 2px solid var(--line); background: var(--sky); color: var(--ink); cursor: pointer; }
+.panel.preview { margin-top: 12px; display: grid; gap: 10px; }
+.panel.preview p { margin: 0; }
+.block-sub { display: block; font-size: 0.9rem; color: var(--muted); margin-top: 2px; }
 .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .nums label { display: grid; gap: 4px; font-size: 0.85rem; }
 .limits { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }

@@ -5,7 +5,10 @@ import { QUESTION_COLUMNS, toQuestion, toRow as questionRow, type QuestionRow } 
 import type { Look } from "../looks";
 import type { ClassId, Level, TopicState } from "../types";
 import type { CheckReport } from "../validation";
-import type { Account, AccountBackend, NewQuestionsResult } from "./backend";
+import type { FamilyQuestionsBody, FamilyQuestionsReply } from "../server/family-questions";
+import type { OwnQuestion, UploadResult } from "../supply/family";
+import type { OwnVerdict } from "../supply/template";
+import type { Account, AccountBackend, CommunityReport, NewQuestionsResult, QuestionUpload } from "./backend";
 import { NotAdmin, NotSignedIn } from "./backend";
 import type { Profile, ProfileDetails } from "./options";
 import type { ProfileData } from "./progress";
@@ -55,18 +58,20 @@ const toClassSettings = (r: ClassSettingsRow): ClassSettings => ({ classId: r.cl
 
 /** Calls the New questions server function (see src/server). */
 export type NewQuestionsCall = (body: { topicId: string; profileId?: string }) => Promise<NewQuestionsResult>;
+/** Calls the family-questions server function (see src/server). */
+export type FamilyQuestionsCall = (body: FamilyQuestionsBody) => Promise<FamilyQuestionsReply>;
 
-/** Supabase Edge Functions: the function named `new-questions`, with the parent's sign-in. */
-export function edgeFunction(client: SupabaseClient): NewQuestionsCall {
+/** A Supabase Edge Function, `new-questions` unless named, called with the parent's sign-in. */
+export function edgeFunction<T = NewQuestionsResult>(client: SupabaseClient, name = "new-questions"): (body: object) => Promise<T> {
   return async body => {
-    const { data, error } = await client.functions.invoke("new-questions", { body });
+    const { data, error } = await client.functions.invoke(name, { body });
     if (error) {
       // The function's own message, like the daily limit, is in the response.
       const ctx = (error as { context?: Response }).context;
       const message = ctx && typeof ctx.json === "function" ? await ctx.json().then(j => j?.error, () => null) : null;
       throw new Error(message || error.message);
     }
-    return data as NewQuestionsResult;
+    return data as T;
   };
 }
 
@@ -74,7 +79,12 @@ export function edgeFunction(client: SupabaseClient): NewQuestionsCall {
  * The family's account in Nitya's Supabase database. Row-level security
  * decides what each parent can see and change; this only shapes the calls.
  */
-export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuestions: NewQuestionsCall = edgeFunction(client)): AccountBackend {
+export function supabaseBackend(
+  client: SupabaseClient,
+  auth: AuthPort,
+  newQuestions: NewQuestionsCall = edgeFunction(client),
+  familyQuestions: FamilyQuestionsCall = edgeFunction<FamilyQuestionsReply>(client, "family-questions"),
+): AccountBackend {
   const userId = async () => {
     const u = await auth.user();
     if (!u) throw new NotSignedIn();
@@ -191,25 +201,86 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuest
       ));
     },
 
-    async questions(topicId) {
-      const rows = must(await client.from("questions").select(QUESTION_COLUMNS).eq("topic_id", topicId).eq("status", "approved").order("id")) as unknown as QuestionRow[];
-      return rows.map(toQuestion);
+    async questions(topicId, pool = {}) {
+      const me = (await auth.user())?.id;
+      const base = client.from("questions").select(`${QUESTION_COLUMNS}, owner, shared`).eq("topic_id", topicId).eq("status", "approved");
+      // Official questions, the family's own, and with the community bank on, every shared one nobody has reported.
+      const query = !me ? base.neq("source", "upload")
+        : base.or(`source.neq.upload,owner.eq.${me}${pool.community ? ",and(shared.is.true,hidden_at.is.null)" : ""}`);
+      const rows = must(await query.order("id")) as unknown as (QuestionRow & { owner: string | null; shared: boolean })[];
+      return rows.map(r => (me && r.owner === me ? { ...toQuestion(r), family: true } : r.shared ? { ...toQuestion(r), community: true } : toQuestion(r)));
+    },
+    async saveUpload(upload) {
+      return await familyQuestions({ action: "upload", fileName: upload.fileName, private: upload.private, rows: upload.rows }) as UploadResult;
+    },
+    async questionUploads() {
+      const rows = must(await client.from("question_uploads").select("id, file_name, private, uploaded_at, questions(status, shared)")
+        .is("removed_at", null).order("uploaded_at", { ascending: false })) as
+        { id: string; file_name: string; private: boolean; uploaded_at: string; questions: { status: string; shared: boolean }[] }[];
+      return rows.map((r): QuestionUpload => ({
+        id: r.id, fileName: r.file_name, uploadedAt: r.uploaded_at, private: r.private,
+        ready: r.questions.filter(q => q.status === "approved").length,
+        inReview: r.questions.filter(q => q.status === "in_review").length,
+        shared: r.questions.filter(q => q.shared).length,
+      }));
+    },
+    async ownQuestions() {
+      const rows = must(await client.from("questions")
+        .select(`${QUESTION_COLUMNS}, upload_id, status, problems, shared, question_uploads(uploaded_at)`)
+        .eq("owner", await userId()).in("status", ["approved", "in_review"])) as unknown as
+        (QuestionRow & { upload_id: string; status: string; problems: string[]; shared: boolean; question_uploads: { uploaded_at: string } | null })[];
+      const rowNo = (r: QuestionRow) => Number(r.source_ref?.match(/row (\d+)$/)?.[1] ?? 0);
+      rows.sort((a, b) => (b.question_uploads?.uploaded_at ?? "").localeCompare(a.question_uploads?.uploaded_at ?? "") || rowNo(a) - rowNo(b));
+      return rows.map((r): OwnQuestion => ({
+        question: toQuestion(r), uploadId: r.upload_id, status: r.status === "approved" ? "ready" : "review", problems: r.problems, shared: r.shared,
+      }));
+    },
+    async reviewOwnQuestion(questionId, review) {
+      if (review.decision === "fix") {
+        const out = await familyQuestions({ action: "fix", questionId, question: review.question }) as { verdict: OwnVerdict };
+        return out.verdict;
+      }
+      must(await client.rpc("review_own_question", { p_question_id: questionId, p_decision: review.decision }));
+      return null;
+    },
+    async removeUpload(uploadId) {
+      must(await client.rpc("remove_question_upload", { p_upload_id: uploadId }));
+    },
+    async reportQuestion(questionId, reason) {
+      must(await client.rpc("report_question", { p_question_id: questionId, p_reason: reason }));
+    },
+    async communityReports() {
+      await requireAdmin();
+      const reports = must(await client.from("question_reports").select("question_id, reason, reported_at")
+        .is("resolved_at", null).order("reported_at")) as { question_id: string; reason: string; reported_at: string }[];
+      const ids = [...new Set(reports.map(r => r.question_id))];
+      if (!ids.length) return [];
+      const rows = must(await client.from("questions").select(QUESTION_COLUMNS).in("id", ids)) as unknown as QuestionRow[];
+      return ids.flatMap((id): CommunityReport[] => {
+        const row = rows.find(r => r.id === id);
+        const mine = reports.filter(r => r.question_id === id);
+        return row ? [{ question: toQuestion(row), reasons: mine.map(r => r.reason), firstReportedAt: mine[0].reported_at }] : [];
+      });
+    },
+    async moderateQuestion(questionId, decision) {
+      must(await client.rpc("moderate_question", { p_question_id: questionId, p_decision: decision }));
     },
     newQuestions: (topicId, profileId) => newQuestions(profileId ? { topicId, profileId } : { topicId }),
     async classSettings() {
       return (must(await client.from("class_settings").select(CLASS_SETTINGS).order("class_id")) as ClassSettingsRow[]).map(toClassSettings);
     },
     async childSettings(profileId) {
-      const r = must(await client.from("profiles").select("pass_percent, wrong_penalty, look, voice").eq("id", profileId).maybeSingle()) as
-        { pass_percent: number | null; wrong_penalty: number | null; look: Look | null; voice: boolean | null } | null;
+      const r = must(await client.from("profiles").select("pass_percent, wrong_penalty, look, voice, community").eq("id", profileId).maybeSingle()) as
+        { pass_percent: number | null; wrong_penalty: number | null; look: Look | null; voice: boolean | null; community: boolean } | null;
       if (!r) throw new Error("That profile isn't in this account.");
-      return { passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty, look: r.look, voice: r.voice };
+      // Off is kept as false, and means the same as never chosen.
+      return { passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty, look: r.look, voice: r.voice, community: r.community || null };
     },
     async saveChildSettings(profileId, c) {
       // The database checks this too; checking first gives the parent a plain message.
       const problem = childSettingsProblem(c);
       if (problem) throw new Error(problem);
-      const rows = must(await client.from("profiles").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty, look: c.look, voice: c.voice })
+      const rows = must(await client.from("profiles").update({ pass_percent: c.passPercent, wrong_penalty: c.wrongPenalty, look: c.look, voice: c.voice, community: c.community === true })
         .eq("id", profileId).select("id")) as unknown[];
       // Row-level security hides other families' children, so nothing changes.
       if (rows.length !== 1) throw new Error("That profile isn't in this account.");
@@ -219,7 +290,7 @@ export function supabaseBackend(client: SupabaseClient, auth: AuthPort, newQuest
       await requireAdmin();
       const rows = must(await client.from("questions")
         .select(`${QUESTION_COLUMNS}, question_checks(report, checked_at)`)
-        .eq("status", "in_review").order("id")
+        .eq("status", "in_review").neq("source", "upload").order("id")
         .order("checked_at", { referencedTable: "question_checks", ascending: false })
         .limit(1, { referencedTable: "question_checks" })) as unknown as (QuestionRow & { question_checks: { report: CheckReport; checked_at: string }[] })[];
       return rows.map((r): ReviewEntry => ({

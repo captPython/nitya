@@ -28,7 +28,7 @@ npm test           # run the tests
 npm run typecheck  # strict TypeScript check
 npm run preview    # build the demo, dist/preview.html, then open it in a browser
 npm run app        # build the real app, dist/app/index.html (see Setting up sign-in below)
-npm run functions  # build the New questions server function (see Setting up sign-in below)
+npm run functions  # build the server functions (new-questions, family-questions) (see Setting up sign-in below)
 npm run test:db    # database tests (see Database below)
 npm run questions -- <command>   # fill the question bank (see Question supply below)
 ```
@@ -140,15 +140,31 @@ The page talks to an account backend (`src/accounts/backend.ts`), and the same t
    npm run functions
    npx supabase link --project-ref <project-ref>
    npx supabase functions deploy new-questions --no-verify-jwt
+   npx supabase functions deploy family-questions --no-verify-jwt
    ```
 
    The function checks the parent's sign-in itself, so it is deployed with `--no-verify-jwt`. Supabase gives it the project URL and the service role key, which it uses to write the question bank; the key never leaves Supabase. Without the function, the button says it couldn't make new questions and quizzes carry on with the bank they have.
 
+## A family's own questions
+
+A parent downloads the **question template** (Grown-ups, Your own questions): an Excel file, `nitya-question-template.xlsx`, with a Questions tab with dropdowns for class, topic, level and skill, a How to fill tab, filled examples, and a Lists tab. Each row is a question: class, topic, level, question, two to four choices, the right answer, a hint and an explanation, and optionally a skill, a reason, a picture of dots, and a sum for Nitya to check. A `.csv` with the same columns also works. Up to 500 rows, 5 MB.
+
+On upload, every row is checked, and the parent sees what will happen before anything is saved:
+
+- **Ready:** passes every check. It goes into the family's children's quizzes at once, and is asked before Nitya's own questions at the same level.
+- **Review:** has an issue (a wrong answer against its sum, a missing reason, and so on). It stays out of quizzes until the family fixes it, approves it as it is, or deletes it. It never goes to Nitya's admin queue. A row with no sum to check is ready, but stays out of the community bank.
+- **Can't be added:** a row Nitya can't read, or that has a link. It is named by its row number, so it can be fixed in the file and the file uploaded again. Questions already added, or already one of Nitya's, are skipped.
+
+**Community bank.** A ready question that passed every check, the answer included, also goes into the community bank, unless the parent ticked *Keep these private*. The bank is separate from Nitya's official questions (a question's `source` is `upload`). A child gets community questions only when their parent turns on *Community questions* in that child's Settings (off to start). Any family can report one: it is hidden from every family until an admin keeps it or removes it in the admin panel's **Community** tab. A family's name is never shown with its questions. Which questions are shared is decided in one place, `isShareable` in `src/supply/family.ts`.
+
+The `family-questions` server function (`npm run functions`, deployed like `new-questions`, with `--no-verify-jwt`) checks every uploaded row and every fix again with the service role, and families can't write the questions table directly, so nothing unchecked reaches the community bank. Deleting an upload or the account removes the family's questions, except those another family's child has already answered: they stay without the family's name, so those answers keep their question.
+
 ## Admin panel
 
-To make someone an admin, add their user id to `public.admins` from the Supabase dashboard. Their Grown-ups page then has **Open the admin panel**, with four tabs:
+To make someone an admin, add their user id to `public.admins` from the Supabase dashboard. Their Grown-ups page then has **Open the admin panel**, with five tabs:
 
 - **Review queue:** every question that failed a check, with the problems the checks found. The admin approves it as it is, fixes it, or rejects it, and children never see it before it is approved. A fix is checked again before it can be saved (a fix that still fails needs a second tap), and starts the question's live results again. Questions from a CSV are fixed in their Drive file instead, so the next sync keeps the fix. Every decision is recorded with who made it.
+- **Community:** community questions that families reported, hidden from every family until the admin keeps one (it shows again) or removes it from the community bank (the family that wrote it keeps it).
 - **Class settings:** each class's default pass mark (65% to start) and marks off (1 to start). Every topic in the class uses them, for every child whose parent hasn't chosen their own.
 - **Level bands:** where each level starts, as the share of children who get a question right first time (L1 85%+, L2 65 to 85%, L3 50 to 65%, L4 under 50%). The four bands move together, so they never leave a gap or overlap.
 - **New questions:** makes questions for any topic, shows how many approved questions each topic has, and lists the latest requests.
@@ -163,6 +179,7 @@ The Supabase schema lives in `supabase/migrations`:
 - `20261025130000_accounts.sql`: the parent PIN hash, the fixed onboarding choices for profiles, and practice plays.
 - `20261025150000_admin_panel.sql`: replaces the per-topic settings with one default per class (`class_settings`) and each child's own choice (`profiles.pass_percent` and `wrong_penalty`), and adds `review_question` and `set_level_bands`, which save a review or the four bands in one step and only for an admin.
 - `20261025170000_child_look.sql`: each child's look (`profiles.look`, `play` or `focus`), where empty means the class decides.
+- `20261026080000_upload_source.sql` and `20261026080100_family_questions.sql`: a family's own questions and the community bank: uploads, the owner and shared flags on questions, reports, `profiles.community`, and the functions for a family's review, a report and an admin's keep or remove.
 
 To apply them to a Supabase project, run the files in name order in the SQL editor, or use the Supabase CLI (`supabase link`, then `supabase db push`). To make someone an admin, add their user id to `public.admins` from the dashboard.
 

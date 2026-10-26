@@ -1,5 +1,8 @@
 import { bandCutsProblem, childSettingsProblem, classSettingsProblems, type ChildSettings } from "../admin/settings";
-import type { Account, AccountBackend, AttemptResult, NewAttempt } from "./backend";
+import { ALL_CONTENT } from "../content";
+import { planFix, planUpload, type OwnQuestion } from "../supply/family";
+import { sameQuestionKey } from "../supply/template";
+import type { Account, AccountBackend, AttemptResult, NewAttempt, QuestionUpload } from "./backend";
 import { NoConsent, NotAdmin, NotSignedIn } from "./backend";
 import { DemoBank } from "./demo-bank";
 import type { Profile, ProfileDetails } from "./options";
@@ -18,6 +21,16 @@ interface DemoParent {
   data: Record<string, ProfileData>;
   /** A parent's choice per child, for all of that child's topics. (Step 6's first version kept per-topic choices under `settings`; they are ignored.) */
   quiz?: Record<string, ChildSettings>;
+  /** The family's uploads of the question template, each with its questions. */
+  uploads?: DemoUpload[];
+}
+
+interface DemoUpload {
+  id: string;
+  fileName: string;
+  uploadedAt: string;
+  private: boolean;
+  questions: OwnQuestion[];
 }
 
 interface DemoState {
@@ -76,6 +89,16 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
   const admin = () => {
     if (!signedIn().account.isAdmin) throw new NotAdmin();
   };
+  /** Keeps the community bank in step with what this family shares. */
+  const publish = (p: DemoParent) => bank.setCommunity(p.account.userId,
+    (p.uploads ?? []).flatMap(u => u.questions.filter(q => q.shared && q.status === "ready" && !bank.isRemoved(q.question.id)).map(q => q.question)));
+  const findOwn = (parent: DemoParent, questionId: string) => {
+    for (const upload of parent.uploads ?? []) {
+      const q = upload.questions.find(x => x.question.id === questionId);
+      if (q) return { upload, q };
+    }
+    throw new Error("That question isn't in this account.");
+  };
   const findAttempt = (parent: DemoParent, attemptId: string) => {
     for (const data of Object.values(parent.data)) {
       const a = data.attempts.find(x => x.id === attemptId);
@@ -110,6 +133,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
     async deleteAccount() {
       const s = read();
       if (!s.signedIn || !s.parents[s.signedIn]) throw new NotSignedIn();
+      bank.forget(s.parents[s.signedIn].account.userId);
       delete s.parents[s.signedIn];
       s.signedIn = null;
       write(s);
@@ -184,7 +208,86 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
       });
     },
 
-    async questions(topicId) { return bank.questions(topicId); },
+    async questions(topicId, pool = {}) {
+      const official = await bank.questions(topicId);
+      const s = read();
+      const me = s.signedIn ? s.parents[s.signedIn] : undefined;
+      if (!me) return official;
+      const mine = (me.uploads ?? []).flatMap(u => u.questions).filter(q => q.status === "ready" && q.question.topicId === topicId);
+      return [
+        ...official,
+        ...mine.map(q => ({ ...q.question, family: true })),
+        ...(pool.community ? bank.community(topicId, me.account.userId).map(q => ({ ...q, community: true })) : []),
+      ];
+    },
+    async saveUpload(upload) {
+      const parent = signedIn();
+      if (!parent.account.consentVersion) throw new NoConsent();
+      const topicIds = [...new Set(ALL_CONTENT.map(c => c.topic.id))];
+      const officialKeys = new Set((await Promise.all(topicIds.map(id => bank.questions(id)))).flat().map(sameQuestionKey));
+      return change((_, p) => {
+        const ownKeys = new Set((p.uploads ?? []).flatMap(u => u.questions.map(q => sameQuestionKey(q.question))));
+        const plan = planUpload({ owner: p.account.userId, fileName: upload.fileName, private: upload.private, rows: upload.rows, contents: ALL_CONTENT, officialKeys, ownKeys });
+        if (!plan.add.length) return { uploadId: null, ...plan.result };
+        const id = randomId();
+        (p.uploads ??= []).unshift({
+          id, fileName: upload.fileName.slice(0, 200), uploadedAt: new Date().toISOString(), private: upload.private,
+          questions: plan.add.map(a => ({ question: a.question, uploadId: id, status: a.verdict.status, problems: a.verdict.problems, shared: a.shared })),
+        });
+        publish(p);
+        return { uploadId: id, ...plan.result };
+      });
+    },
+    async questionUploads() {
+      return (signedIn().uploads ?? []).map((u): QuestionUpload => ({
+        id: u.id, fileName: u.fileName, uploadedAt: u.uploadedAt, private: u.private,
+        ready: u.questions.filter(q => q.status === "ready").length,
+        inReview: u.questions.filter(q => q.status === "review").length,
+        shared: u.questions.filter(q => q.shared && !bank.isRemoved(q.question.id)).length,
+      }));
+    },
+    async ownQuestions() {
+      return (signedIn().uploads ?? []).flatMap(u => u.questions.map(q => ({ ...structuredClone(q), shared: q.shared && !bank.isRemoved(q.question.id) })));
+    },
+    async reviewOwnQuestion(questionId, review) {
+      return change((_, p) => {
+        const { upload, q } = findOwn(p, questionId);
+        if (review.decision === "delete") {
+          upload.questions = upload.questions.filter(x => x !== q);
+          if (!upload.questions.length) p.uploads = p.uploads!.filter(u => u !== upload);
+          publish(p);
+          return null;
+        }
+        if (q.status !== "review") throw new Error("This question was already reviewed.");
+        if (review.decision !== "fix") {
+          // Approved with its issues: for the family's own children only.
+          Object.assign(q, { status: "ready", shared: false });
+          return null;
+        }
+        const fix = planFix(q.question, review.question, ALL_CONTENT, upload.private);
+        const key = sameQuestionKey(fix.question);
+        if ((p.uploads ?? []).some(u => u.questions.some(x => x !== q && sameQuestionKey(x.question) === key))) {
+          throw new Error("You already have this question.");
+        }
+        Object.assign(q, { question: fix.question, status: fix.verdict.status, problems: fix.verdict.problems, shared: fix.shared });
+        publish(p);
+        return fix.verdict;
+      });
+    },
+    async removeUpload(uploadId) {
+      change((_, p) => {
+        if (!(p.uploads ?? []).some(u => u.id === uploadId)) throw new Error("That upload isn't in this account.");
+        p.uploads = p.uploads!.filter(u => u.id !== uploadId);
+        publish(p);
+      });
+    },
+    async reportQuestion(questionId, reason) {
+      const text = reason.trim();
+      if (!text || text.length > 300) throw new Error("Say in a few words what is wrong with it.");
+      bank.report(questionId, signedIn().account.userId, text);
+    },
+    async communityReports() { admin(); return bank.reports(); },
+    async moderateQuestion(questionId, decision) { admin(); bank.moderate(questionId, decision); },
     async newQuestions(topicId, profileId) {
       const parent = signedIn();
       if (profileId) own(parent, profileId);
@@ -192,14 +295,14 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
     },
     async classSettings() { signedIn(); return bank.classSettings(); },
     async childSettings(profileId) {
-      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, look: null, voice: null, ...p.quiz?.[profileId] }; });
+      return change((_, p) => { own(p, profileId); return { passPercent: null, wrongPenalty: null, look: null, voice: null, community: null, ...p.quiz?.[profileId] }; });
     },
     async saveChildSettings(profileId, c) {
       change((_, p) => {
         own(p, profileId);
         const problem = childSettingsProblem(c);
         if (problem) throw new Error(problem);
-        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty, look: c.look, voice: c.voice };
+        (p.quiz ??= {})[profileId] = { passPercent: c.passPercent, wrongPenalty: c.wrongPenalty, look: c.look, voice: c.voice, community: c.community ?? null };
       });
     },
 
