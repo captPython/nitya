@@ -367,7 +367,8 @@ export function judgeOwnQuestion(question: SuppliedQuestion, topic: TemplateTopi
     problems.push(right.length
       ? `The right answer says ${listOf(report.answer.wrongKeys)}, but the sum "${workingText(question.working)}" gives ${listOf(right)}.`
       : `The right answer says ${listOf(report.answer.wrongKeys)}, but the sum "${workingText(question.working)}" gives an answer that isn't one of the choices.`);
-    problems.push(...report.answer.problems.filter(p => !p.startsWith("Recomputing gives")));
+    // The sentence above already says which choice is right.
+    problems.push(...report.answer.problems.filter(p => !/^Recomputing gives|right but not listed|^None of the options is right/.test(p)));
   } else if (!unchecked) {
     problems.push(...report.answer.problems);
   }
