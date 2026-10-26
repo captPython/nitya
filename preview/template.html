@@ -151,6 +151,8 @@ b, strong { font-weight: var(--body-strong); }
 .ghost.danger { color: var(--coral); }
 .ghost.danger.sure { background: var(--coral-soft); }
 .ghost.danger.sure { border-color: var(--coral-line); font-weight: 600; }
+/* A disabled button looks it */
+.ghost[disabled] { opacity: .5; cursor: default; }
 .addkid { width: 100%; min-height: 56px; background: none; border: 2px dashed var(--line); color: var(--blue); box-shadow: none; font-weight: 600; }
 .member-more { border-top: 1px solid var(--line-soft); padding-top: 6px; justify-content: space-between; }
 .account { justify-content: space-between; border-top: 1px solid var(--line-soft); padding-top: 10px; }
@@ -207,7 +209,8 @@ b, strong { font-weight: var(--body-strong); }
 .qtop .qtitle { flex: 1; min-width: 0; display: grid; }
 .qprog { display: flex; height: 18px; border-radius: 999px; overflow: hidden; background: var(--card); border: 3px solid var(--line); }
 .qprog span { flex: 1; }
-.qprog .done { background: var(--leaf-node); }
+/* Done questions are a plain blue, never green: green means "right" everywhere else in the playful look. */
+.qprog .done { background: var(--dot-blue); }
 [data-look="focus"] .qprog { height: 6px; gap: 3px; border: 0; border-radius: 0; background: none; overflow: visible; }
 [data-look="focus"] .qprog span { border-radius: 3px; background: var(--track); }
 [data-look="focus"] .qprog .done { background: var(--blue); }
@@ -246,9 +249,18 @@ b, strong { font-weight: var(--body-strong); }
 .goalflag.burst::after { content: "★ ★ ★"; position: absolute; left: 50%; top: 0; transform: translateX(-50%); white-space: nowrap; color: var(--star); -webkit-text-stroke: 1px var(--star-line); font-size: 1rem; letter-spacing: .1em; animation: burst .9s ease-out both; pointer-events: none; line-height: 1; }
 @keyframes burst { from { opacity: 0; transform: translate(-50%, 6px) scale(.4); } 40% { opacity: 1; transform: translate(-50%, -18px) scale(1.2); } to { opacity: 0; transform: translate(-50%, -30px) scale(1); } }
 .qdots { display: flex; gap: 4px; justify-content: space-between; }
-.qdots span { flex: 1; max-width: 12px; height: 8px; border-radius: 999px; background: var(--track); }
-.qdots .done { background: var(--leaf-node); }
-.qdots .now { background: var(--blue-mid); }
+.qdots span { flex: 1; max-width: 12px; height: 10px; border-radius: 999px; background: var(--track); }
+.qdots .done { background: var(--dot-blue); }
+/* The question showing is a ring, and stays one until Next */
+.qdots .now { background: var(--card); box-shadow: inset 0 0 0 2.5px var(--ink); }
+/* After the flag: the flag kept, the star it earned, and the next two stars filling */
+.marks.meter.goal.starsphase { padding-right: 16px; }
+.starrow { display: flex; align-items: center; gap: 10px; }
+.flagdone { color: var(--leaf); line-height: 0; margin-right: 2px; }
+.flagdone svg { width: 30px; height: 30px; }
+.starslot { position: relative; width: 36px; height: 36px; line-height: 0; }
+.starfill { position: absolute; inset: 0 auto 0 0; overflow: hidden; transition: width .6s ease-out; }
+.starfill svg { width: 36px; height: 36px; max-width: none; }
 /* On a phone the clean marks card is one line, a thin bar and the "How marks work" link, so the answers stay in view. */
 @media (max-width: 520px) {
   [data-look="focus"] .marks { padding: 10px 14px 6px; gap: 4px; }
@@ -269,7 +281,7 @@ b, strong { font-weight: var(--body-strong); }
 /* "How marks work" sits at the end of the marks line, and opens onto its own line */
 .howmarks { margin-left: auto; }
 .howmarks[open] { flex-basis: 100%; margin-left: 0; }
-.howmarks summary { cursor: pointer; font-size: 0.9rem; color: var(--blue); min-height: 44px; display: flex; align-items: center; }
+.howmarks summary { cursor: pointer; font-size: 0.9rem; color: var(--blue); min-height: 44px; min-width: 44px; padding: 0 4px; display: flex; align-items: center; justify-content: center; }
 .hm-short { display: none; }
 .marks-top:has(.howmarks[open]) { flex-wrap: wrap; }
 .howmarks p { margin-top: 0; }
@@ -350,7 +362,12 @@ button.num:focus-visible { outline: 3px solid var(--ring); outline-offset: 4px; 
 .mini b { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--blue); }
 .mini b.ok { background: var(--leaf); }
 .mini i { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--ink); }
-.stars-sm { color: var(--star); letter-spacing: .05em; font-size: 1.05rem; -webkit-text-stroke: 1px var(--star-line); }
+/* Stars are drawn: filled with an outline when earned, only the outline when not */
+.star { display: inline-block; vertical-align: middle; flex: none; }
+.star path { stroke-linejoin: round; }
+.star.on path { fill: var(--star); stroke: var(--star-line); stroke-width: 1.4; }
+.star.off path { fill: none; stroke: var(--star-off); stroke-width: 1.8; }
+.stars-sm { display: inline-flex; gap: 2px; line-height: 0; }
 .starglyph { color: var(--star); -webkit-text-stroke: 1.5px var(--star-line); }
 .chipbtn {
   font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.1rem; min-height: 50px; padding: 0 22px;
@@ -364,12 +381,16 @@ button.num:focus-visible { outline: 3px solid var(--ring); outline-offset: 4px; 
 .area .mini { width: 100%; grid-column: 1 / -1; }
 .lvlrow { display: grid; grid-template-columns: 110px minmax(0, 1fr) 48px; gap: 10px; align-items: center; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 .lvlrow .mini { width: 100%; }
-.stars { font-family: var(--font-display); font-size: 3rem; letter-spacing: .1em; line-height: 1; text-align: center; }
-.stars .on { color: var(--star); -webkit-text-stroke: 2px var(--star-line); display: inline-block; animation: starpop .45s calc(var(--i) * .35s + .2s) both; }
-.stars .off { color: var(--star-off); }
+.stars { display: flex; justify-content: center; gap: 8px; line-height: 0; }
+.stars .on { animation: starpop .45s calc(var(--i) * .35s + .2s) both; }
 @keyframes starpop { from { transform: scale(0); opacity: 0; } 70% { transform: scale(1.25); } to { transform: scale(1); opacity: 1; } }
 .center { text-align: center; }
 .cert { border: 3px solid var(--sun); border-radius: 24px; padding: 24px; text-align: center; display: grid; gap: 10px; justify-items: center; }
+.cert .say { position: static; }
+/* The certificate: a tick for every topic in the class */
+.ticks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ticks span { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--leaf); color: #ffffff; font-weight: 800; }
+[data-mode="dark"] .ticks span { color: var(--sky); }
 .kid .cert { border: 3px solid var(--sun); }
 @media (max-width: 520px) {
   .topic { grid-template-columns: var(--node) minmax(0, 1fr); }
@@ -438,7 +459,7 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 
 /* New questions, settings and the admin panel */
 .act { display: grid; gap: 4px; justify-items: end; }
-.linkbtn { font: inherit; font-size: 0.88rem; font-weight: var(--body-strong); min-height: 36px; padding: 0 6px; border: 0; background: none; color: var(--blue); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.linkbtn { font: inherit; font-size: 0.88rem; font-weight: var(--body-strong); min-height: 44px; padding: 0 6px; border: 0; background: none; color: var(--blue); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .linkbtn[disabled] { color: var(--muted); cursor: default; }
 .linkbtn:focus-visible { border-radius: 6px; }
 .settings { display: grid; gap: 12px; }
@@ -447,7 +468,8 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 .stepper { display: inline-flex; align-items: center; gap: 10px; }
 .stepper .ghost { min-width: 56px; min-height: 52px; padding: 0; font-size: 1.5rem; }
 .stepper .ghost[disabled] { opacity: .4; cursor: default; }
-.stepper b { min-width: 2.2ch; text-align: center; font-family: var(--font-display); font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+.stepper b { min-width: 2.2ch; text-align: center; font-family: var(--font-display); font-size: 1.4rem; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.stepper b small { display: block; font-family: var(--font-body); font-size: 0.75rem; font-weight: 400; color: var(--muted); }
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
 .tabs .ghost.on { background: var(--blue-soft); border-color: var(--blue); }
 .looks { display: grid; gap: 10px; }
@@ -460,7 +482,9 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 .qcard { border: var(--bw-ghost) solid var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
 .optlist { display: flex; gap: 8px; flex-wrap: wrap; }
 .optlist span { min-width: 48px; text-align: center; padding: 4px 12px; border-radius: 12px; border: 2px solid var(--line); font-weight: var(--body-strong); }
-.optlist span.ans { border-color: var(--leaf); background: var(--leaf-soft); }
+/* The stored answer is the question's key, neutral until a check disagrees with it */
+.optlist span.anskey { border-color: var(--ink); }
+.optlist span.anskey.bad { border-color: var(--coral-line); background: var(--coral-soft); color: var(--coral); }
 .problems { margin: 0; padding: 10px 14px 10px 32px; border-radius: 14px; background: var(--coral-soft); display: grid; gap: 4px; font-size: 0.95rem; }
 .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .nums label { display: grid; gap: 4px; font-size: 0.85rem; }
@@ -532,7 +556,18 @@ input[type="number"], select {
 .tapdot { width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.2rem; color: #ffffff; }
 .tapdot.blue { background: var(--dot-blue); }
 .tapdot.orange { background: var(--dot-orange); }
-.tapdot.crossed { opacity: .45; }
+.tapdot { position: relative; }
+/* A crossed-out dot is only a picture: faded, with a cross, and it can't be counted */
+.tapdot.crossed { display: inline-block; opacity: .45; cursor: default; }
+.tapdot.crossed::before, .tapdot.crossed::after { content: ""; position: absolute; left: 16%; right: 16%; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: var(--ink); transform: rotate(45deg); }
+.tapdot.crossed::after { transform: rotate(-45deg); }
+/* In a quiz: rows of 5, groups side by side when they fit, so the answers stay in view */
+.tapdots.compact { flex-direction: row; flex-wrap: nowrap; justify-content: center; gap: 10px 24px; }
+.tapdots.compact .dotgroup { display: grid; grid-template-columns: repeat(var(--cols, 5), 40px); gap: 6px; }
+.tapdots.compact .tapdot { width: 40px; height: 40px; font-size: 1.05rem; }
+/* A hint's amount, drawn as dots in rows of 5 */
+.hintdots { display: grid; grid-template-columns: repeat(var(--cols, 5), 24px); gap: 6px; margin: 8px 0; }
+.hintdots i { width: 24px; height: 24px; border-radius: 50%; background: var(--dot-blue); }
 .tapdot.counted { box-shadow: 0 0 0 4px var(--sun); }
 [data-mode="dark"] .tapdot { color: #0e1a2f; }
 .btn.ready { animation: pulse 1s ease-in-out 2; }
@@ -551,12 +586,14 @@ input[type="number"], select {
 /* An open topic is one button: ring, the title on one line, the score under it, and a chevron */
 .rowbtn { width: 100%; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .rowbtn .tmain { gap: 2px; }
-.ttl { font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Up to two lines, so a long title like "Taking away with objects up to 10" keeps its end */
+.ttl { font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .rowbtn svg { color: var(--muted); }
 .topic.current .ttl { color: var(--blue); }
 .rowbtn .tmeta .chip { padding: 0 8px; }
 .rowbtn:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
 @media (hover: hover) and (pointer: fine) { .rowbtn:hover { box-shadow: 0 0 0 2px var(--blue-mid); } }
+.btn.iconlabel { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
 .btn.primary small { display: block; font-family: var(--font-body); font-size: 0.85rem; font-weight: 500; opacity: .9; }
 
 /* Sign-in with Google, in Google's own button style */
@@ -591,7 +628,11 @@ label.inline { font-weight: 400; }
 .live { font-size: 0.95rem; }
 .warn { background: var(--hint-bg); border-radius: 12px; padding: 10px 12px; font-size: 0.95rem; }
 .danger-zone { border-color: var(--coral-line); }
+/* Withdraw consent sits apart from everything else on the page */
+.danger-zone.apart { margin-top: 22px; }
 .datasum { display: grid; gap: 10px; }
+.datasum summary { cursor: pointer; color: var(--blue); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.answerpick .check { min-height: 44px; align-items: center; margin-top: 6px; }
 @media print { .top, .side, .gbar, button { display: none !important; } }
 
 /* Progress page and the privacy notice */
@@ -614,6 +655,18 @@ label.inline { font-weight: 400; }
 .pick input { width: 22px; height: 22px; accent-color: var(--leaf); }
 .pick:has(input:checked) { border-color: var(--leaf); background: var(--leaf-soft); }
 .sticky-save { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; background: var(--card); border-top: 1px solid var(--line-soft); }
+/* Phones: the playful owl is a little smaller and its speaker sits under it, so the question gets the bubble's full
+   width; a long word problem is a size smaller. Both keep the answers above a 640px fold. */
+@media (max-width: 520px) {
+  [data-look="play"] .mascot { gap: 10px; }
+  [data-look="play"] .mascot > svg { width: 52px; height: 52px; }
+  [data-look="play"] .mascot .bubble:has(> .say) { padding-right: 18px; min-height: 110px; }
+  [data-look="play"] .mascot .bubble > .say { right: auto; left: -60px; top: 60px; width: 48px; height: 48px; }
+  .trail-extra .mascot { align-items: flex-start; }
+  .prompt.long { font-size: 1.3rem; line-height: 1.25; }
+}
+/* In a quiz or the check on a phone, the top bar (the name and the Dark switch) steps aside for the question */
+@media (max-width: 520px) { [data-quiz] .top { display: none; } [data-quiz] .wrap { padding-top: 12px; } }
 /* Small phones (360px): the quiz's answers and the dots picture stay above a 640px fold */
 @media (max-width: 520px) { [data-screen="kid"] .card.kid { gap: 12px; } }
 @media (max-width: 380px) {
@@ -622,7 +675,7 @@ label.inline { font-weight: 400; }
   [data-look="focus"] .kid .visual { padding: 8px 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .btn, .fill, .chipbtn { transition: none; } .btn:hover, .btn:active, .chipbtn:active { transform: none; }
+  .btn, .fill, .chipbtn, .starfill { transition: none; } .btn:hover, .btn:active, .chipbtn:active { transform: none; }
   .stars .on, .btn.ready, .card.enter, .btn.right, .btn.tried { animation: none; }
   .goalflag.burst::after { animation: none; opacity: 0; }
 }

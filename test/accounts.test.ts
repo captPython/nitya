@@ -140,7 +140,7 @@ describe("a child's progress", () => {
   it("starts a new class with the first topic open", () => {
     const s = summarize("UKG", topics, { attempts: [], responses: [], topics: [] });
     expect(Object.values(s.progress.topics).map(t => t.state)).toEqual(["current", "locked", "locked", "locked", "locked"]);
-    expect(s).toMatchObject({ seen: {}, stars: {}, skills: {}, levels: {}, promoted: false, plays: {} });
+    expect(s).toMatchObject({ seen: {}, stars: {}, skills: {}, recentSkills: {}, levels: {}, promoted: false, plays: {} });
   });
 
   it("works out seen questions, stars, skills and plays from the saved plays", () => {
@@ -166,6 +166,25 @@ describe("a child's progress", () => {
     expect(s.progress.topics[c1.topicId]).toEqual({ state: "cleared", attempts: 2, bestScore: 60 });
     expect(s.progress.topics[UKG_TOPICS[1].topic.id].state).toBe("current");
     expect(s.promoted).toBe(false);
+  });
+
+  it("judges improvement areas on recent plays, so a skill learned since stops showing", () => {
+    const play = (id: string, hour: number, right: boolean[]) => ({
+      attempt: { id, topicId: c1.topicId, attemptNo: hour, practice: false, startedAt: `2026-10-25T1${hour}:00:00Z`, finishedAt: "x", marks: 0, cleared: false, stars: 0 },
+      responses: right.map((ok, i) => ({ attemptId: id, seq: i + 1, questionId: c1.id, level: 1 as const, subSkill: c1.subSkill, firstTryCorrect: ok, retryCorrect: null, marksDelta: 0 })),
+    });
+    const plays = [play("a", 1, [false, false, false]), play("b", 2, [false, true]), play("c", 3, [true, true, true])];
+    const data = (state: "current" | "cleared"): ProfileData => ({
+      attempts: plays.map(p => p.attempt), responses: plays.flatMap(p => p.responses),
+      topics: [{ topicId: c1.topicId, state, attempts: 3, bestMarks: 50 }],
+    });
+    const key = `${c1.topicId}|${c1.subSkill}`;
+    // Every answer still counts towards the all-time tally.
+    expect(summarize("UKG", topics, data("current")).skills[key]).toEqual({ right: 4, total: 8 });
+    // Not cleared yet: the last two plays.
+    expect(summarize("UKG", topics, data("current")).recentSkills[key]).toEqual({ right: 4, total: 5 });
+    // Cleared: only the last play.
+    expect(summarize("UKG", topics, data("cleared")).recentSkills[key]).toEqual({ right: 3, total: 3 });
   });
 
   it("says the class is complete when every topic is cleared", () => {

@@ -8,7 +8,10 @@ export const MIN_LEVEL: Level = 1;
 
 /** Marks for a right first try, by level: harder questions move the bar further. */
 export const MARKS_BY_LEVEL: Record<Level, number> = { 1: 1, 2: 2, 3: 3, 4: 4 };
-/** Marks taken away for a wrong first try, unless the topic's settings say otherwise. The total never drops below 0. */
+/**
+ * Marks taken away for a wrong first try, unless the class or the child's settings say otherwise. The total never
+ * drops below 0, and once a quiz has reached the pass mark it never drops back below it, so a reached pass mark is kept.
+ */
 export const WRONG_PENALTY = 1;
 /**
  * Marks needed to clear a topic, unless the topic's settings say otherwise (an
@@ -163,7 +166,8 @@ export function answerFirstTry(
 ): { state: QuizState; result: FirstTryResult } {
   if (s.pendingRetry) throw new Error("Finish the hint retry first");
   const right = checkAnswer(q, response);
-  const marksDelta = right ? MARKS_BY_LEVEL[q.level] : 0 - Math.min(s.wrongPenalty, s.marks);
+  const floor = s.marks >= s.passMarks ? s.passMarks : 0;
+  const marksDelta = right ? MARKS_BY_LEVEL[q.level] : 0 - Math.min(s.wrongPenalty, s.marks - floor);
   const next: QuizState = {
     ...s,
     marks: s.marks + marksDelta,

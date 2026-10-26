@@ -128,6 +128,17 @@ describe("marks", () => {
     expect(s.responses.every(r => r.marksDelta === 0)).toBe(true);
   });
 
+  it("keeps a reached pass mark: wrong first tries after it can't take the quiz back below it", () => {
+    const start = startQuiz({ classId: "UKG", topicId: topic.id, attemptNo: 1, passMarks: 5, wrongPenalty: 2 });
+    // 1 + 1 + 2 + 2 = 6 reaches the pass mark of 5; the first wrong try then costs 1, not 2, and the next costs nothing.
+    const { s } = playSequence([true, true, true, true, false, false], start);
+    expect(s.responses.map(r => r.marksDelta)).toEqual([1, 1, 2, 2, -1, 0]);
+    expect(s.marks).toBe(5);
+    expect(isQualified(s)).toBe(true);
+    // Below the pass mark, the full penalty still applies.
+    expect(playSequence([true, true, true, false], start).s.marks).toBe(2);
+  });
+
   it("does not change on the hint retry", () => {
     let s = playSequence([true, true]).s;
     const q = nextQuestion(s, bank, first);
@@ -142,12 +153,13 @@ describe("marks", () => {
     expect(playSequence(Array(QUIZ_LENGTH).fill(true)).s.marks).toBe(68);
   });
 
-  it("qualifies once the bar crosses the pass mark and can fall back below", () => {
+  it("qualifies once the bar reaches the pass mark, and stays qualified", () => {
     let { s } = playSequence(Array(14).fill(true)); // 2 + 4 + 6 + 8 * 4 = 44
     expect(s.marks).toBe(PASS_MARKS);
     expect(isQualified(s)).toBe(true);
-    s = playSequence([false], s).s;
-    expect(isQualified(s)).toBe(false);
+    s = playSequence([false, false], s).s;
+    expect(s.marks).toBe(PASS_MARKS);
+    expect(isQualified(s)).toBe(true);
   });
 });
 

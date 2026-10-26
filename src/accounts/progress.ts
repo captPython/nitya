@@ -54,6 +54,11 @@ export interface ProgressSummary {
   stars: Record<string, number>;
   /** First-try results by "topicId|subSkill". */
   skills: Record<string, Tally>;
+  /**
+   * The same, from recent plays only: the last two plays that asked the skill, or just the last one once its topic
+   * is cleared. Improvement areas use these, so a skill a child has since learned stops showing as one to work on.
+   */
+  recentSkills: Record<string, Tally>;
   /** First-try results by level. */
   levels: Partial<Record<Level, Tally>>;
   /** Every topic in the class is cleared. */
@@ -74,7 +79,8 @@ export function summarize(classId: ClassId, topics: Topic[], data: ProfileData):
     .filter(r => byAttempt.has(r.attemptId))
     .sort((a, b) => order.get(a.attemptId)! - order.get(b.attemptId)! || a.seq - b.seq);
 
-  const summary: ProgressSummary = { progress, seen: {}, stars: {}, skills: {}, levels: {}, promoted: false, plays: {} };
+  const summary: ProgressSummary = { progress, seen: {}, stars: {}, skills: {}, recentSkills: {}, levels: {}, promoted: false, plays: {} };
+  const bySkill = new Map<string, ResponseRow[]>();
   for (const a of attempts) {
     summary.plays[a.topicId] = Math.max(summary.plays[a.topicId] ?? 0, a.attemptNo);
     if (a.cleared && a.stars) summary.stars[a.topicId] = Math.max(summary.stars[a.topicId] ?? 0, a.stars);
@@ -85,10 +91,18 @@ export function summarize(classId: ClassId, topics: Topic[], data: ProfileData):
     const at = list.indexOf(r.questionId);
     if (at >= 0) list.splice(at, 1);
     list.push(r.questionId);
-    const skill = (summary.skills[`${topicId}|${r.subSkill}`] ??= { right: 0, total: 0 });
+    const key = `${topicId}|${r.subSkill}`;
+    const skill = (summary.skills[key] ??= { right: 0, total: 0 });
+    bySkill.set(key, [...(bySkill.get(key) ?? []), r]);
     const level = (summary.levels[r.level] ??= { right: 0, total: 0 });
     skill.total++; level.total++;
     if (r.firstTryCorrect) { skill.right++; level.right++; }
+  }
+  for (const [key, rs] of bySkill) {
+    const keep = progress.topics[key.split("|")[0]]?.state === "cleared" ? 1 : 2;
+    const plays = [...new Set(rs.map(r => r.attemptId))].slice(-keep);
+    const recent = rs.filter(r => plays.includes(r.attemptId));
+    summary.recentSkills[key] = { right: recent.filter(r => r.firstTryCorrect).length, total: recent.length };
   }
   const states = Object.values(progress.topics);
   summary.promoted = states.length > 0 && states.every(t => t.state === "cleared");

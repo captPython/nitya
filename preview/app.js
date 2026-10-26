@@ -155,7 +155,7 @@ async function askNewQuestions(topicId, profileId) {
 const voiceOn = (mine, lookShown) => mine?.voice ?? lookShown === "play";
 function childVoice() {
   // The placement check comes before the child's settings exist, so it follows the look.
-  if (app.mode === "placement") return look() === "play";
+  if (["placement", "placement-done"].includes(app.mode)) return look() === "play";
   return !!child && PLAYING.includes(app.mode) && voiceOn(settings.child, look());
 }
 function speak(text) {
@@ -219,6 +219,8 @@ const WORDS = {
 const word = k => WORDS[look()][k];
 /** A question's text, with number runs like "1, 2, 3, __" kept on one line. */
 const promptHtml = text => esc(text).replace(/(?:\d+|_+)(?:, (?:\d+|_+)){2,}/g, m => `<span class="seq">${m}</span>`);
+/** A long word problem is set a size smaller on a phone, so its answers stay in view. */
+const promptClass = text => (text.length > 48 ? "prompt long" : "prompt");
 
 /* ---------- dots ---------- */
 function dotsSvg(visual) {
@@ -413,9 +415,13 @@ function wirePinPad(done) {
 
 function renderSetPin() {
   const confirming = app.first !== null;
+  // The first PIN, straight after consent, is the one screen of sign-up with nothing else on it, so it offers Sign out.
+  const firstRun = app.then === "route" && !app.reset;
   screen.innerHTML = pinPad(confirming ? "Type the PIN again" : app.reset ? "Set a new PIN" : "Set a parent PIN",
     confirming ? "Just to be sure." : "4 digits that only grown-ups know. Nitya asks for it before switching children, editing a profile or opening settings.",
-    confirming ? `<button class="ghost quiet" type="button" id="again">Start again</button>` : `<p class="small muted">Don't use a birthday or a year.</p>`);
+    (confirming ? `<button class="ghost quiet" type="button" id="again">Start again</button>` : `<p class="small muted">Don't use a birthday or a year.</p>`)
+      + (firstRun ? `<div class="row account">${signOutButton()}</div>` : ""));
+  if (firstRun) wireSignOut();
   const again = document.getElementById("again");
   if (again) again.onclick = () => { app.first = null; app.pin = ""; app.error = null; render(); };
   wirePinPad(pin => {
@@ -630,19 +636,36 @@ function renderPlacement() {
       <button class="ghost iconbtn" type="button" id="stop" aria-label="Stop the check">${ICONS.close}<span class="lbl">Stop</span></button></div>
     ${app.confirmStop ? stopCard("Stop the check?", "Nothing from the check is saved. You can start it again.", "Stop the check") : ""}
     <div class="qprog" role="progressbar" aria-label="Questions done" aria-valuemin="0" aria-valuemax="${app.qs.length}" aria-valuenow="${app.i}">${app.qs.map((_, i) => `<span class="${i < app.i ? "done" : i === app.i ? "now" : ""}"></span>`).join("")}</div>
-    <div class="mascot">${MASCOT}<div class="bubble"><p class="prompt" tabindex="-1">${promptHtml(q.prompt)}</p>${sayBtn(q.prompt)}</div></div>
-    ${dotsSvg(q.visual)}
+    <div class="mascot">${MASCOT}<div class="bubble"><p class="${promptClass(q.prompt)}" tabindex="-1">${promptHtml(q.prompt)}</p>${sayBtn(q.prompt)}</div></div>
+    ${quizDots(q.visual)}
     ${optionButtons(q.options, "data-opt")}
     <p class="small muted">${look() === "play" ? "Just do your best!" : "No marks here. Just do your best!"}</p>`;
   autoSay(`placement${app.i}`, q.prompt);
+  wireTapDots();
   screen.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
     app.results.push(M.checkAnswer(q, b.dataset.opt));
     app.confirmStop = false;
+    app.counted = [];
     if (++app.i < app.qs.length) render();
-    else show({ mode: "placement-result", draft: app.draft, suggestion: M.placementSuggestion(app.draft.classId, app.draft.nickname, app.results, M.CLASSES_WITH_CONTENT) });
+    else show({ mode: "placement-done", draft: app.draft, suggestion: M.placementSuggestion(app.draft.classId, app.draft.nickname, app.results, M.CLASSES_WITH_CONTENT) });
   });
   document.getElementById("stop").onclick = () => { app.confirmStop = true; render(); document.getElementById("keepon")?.focus(); };
   wireStopCard(() => show({ mode: "placement-offer", draft: app.draft }), "stop");
+}
+
+/** The child's last screen of the check: hand the phone back, so the grown-up, not the child, sees the result. */
+function renderPlacementDone() {
+  const { draft: d, suggestion: s } = app;
+  const play = look() === "play";
+  const body = play ? "Give the phone back to your grown-up." : "Please hand the phone back to your parent.";
+  screen.innerHTML = `
+    <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">All done!</h2><p>${esc(body)}</p>${sayBtn(`All done! ${body}`)}</div></div>
+    <div class="row actions"><button class="btn primary iconlabel" type="button" id="grown">${ICONS.lock}I'm the grown-up</button></div>`;
+  autoSay("placement-done", `All done! ${body}`);
+  // With more than one class to choose from, the choice is behind the PIN, so the child can't make it.
+  document.getElementById("grown").onclick = () => s.suggested !== d.classId
+    ? askPin(`To choose ${d.nickname}'s class.`, () => show({ mode: "placement-result", draft: d, suggestion: s }))
+    : show({ mode: "placement-result", draft: d, suggestion: s });
 }
 
 function renderPlacementResult() {
@@ -687,8 +710,15 @@ const QUIZ_KEY = id => `nitya-quiz-${id}`;
 const boardName = id => M.BOARDS.find(b => b.id === id)?.name ?? id;
 const languageName = id => M.LANGUAGES.find(l => l.id === id)?.name ?? id;
 const starText = n => `${n} ${n === 1 ? "star" : "stars"}`;
+// One drawn star for every screen: filled when earned, an outline when not, so an empty star never reads as a full one.
+const STAR_PATH = "M12 2.6l2.85 6.05 6.6.8-4.86 4.55 1.25 6.55L12 17.3l-5.84 3.25 1.25-6.55-4.86-4.55 6.6-.8z";
+const starSvg = (on, size) => `<svg class="star ${on ? "on" : "off"}" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><path d="${STAR_PATH}"/></svg>`;
+/** A topic's stars as one picture: "2 of 3 stars". */
+const starRow = (n, size = 22) => `<span class="stars-sm" role="img" aria-label="${n} of 3 stars">${[0, 1, 2].map(i => starSvg(i < n, size)).join("")}</span>`;
 /** The strip on every grown-up screen, so it is clear the child has left their own screens. */
 const gbar = () => `<div class="gbar">${ICONS.lock}<span>Grown-ups area</span></div>`;
+/** The way back at the top of a grown-up page, as on the admin panel, so a long page doesn't hide it at the bottom. */
+const backLink = label => `<div class="row"><button class="ghost quiet backlink" type="button" id="back">‹ ${esc(label)}</button></div>`;
 /** "Stop now?" with Keep going as the safe, first choice, a ▶ and a ⏸ for children who don't read yet, and the speaker. */
 const stopCard = (title, text, stopLabel) => `<div class="confirm" role="alertdialog" aria-labelledby="stoph" aria-describedby="stopp">
     <b id="stoph">${esc(title)}</b><p id="stopp" class="small">${esc(text)}</p>${sayBtn(`${title} ${text}`)}
@@ -723,6 +753,7 @@ function download(name, value) {
 function renderGrownups() {
   if (!app.sums) loadFamily();
   screen.innerHTML = `<div class="narrow">
+    ${backLink(child ? `Back to ${child.nickname}` : "Choose a child")}
     ${gbar()}<h1>Your family</h1>
     ${account.email ? `<p class="muted">Signed in as ${esc(account.email)}</p>` : ""}
     ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
@@ -743,8 +774,7 @@ function renderGrownups() {
           <div class="row"><button class="ghost tonal" type="button" id="demoadmin">Make me the admin${ICONS.arrow}</button></div></div>` : ""}
     <div class="row account"><button class="ghost quiet" type="button" id="pin">${ICONS.lock}Change the PIN</button>
       ${signOutButton()}</div>
-    <div class="row"><button class="btn primary" type="button" id="done">${child ? `Back to ${esc(child.nickname)}` : "Choose a child"}</button></div>
-    <section class="setting danger-zone"><h3>Withdraw consent</h3>
+    <section class="setting danger-zone apart"><h3>Withdraw consent</h3>
       <p class="small muted">Deletes every child's profile and progress, your email, the consent record and the PIN, then signs you out.</p>
       <div class="row"><button class="ghost quiet danger" type="button" id="withdraw">${ICONS.trash}Withdraw consent and delete everything…</button></div></section>
   </div>`;
@@ -763,7 +793,7 @@ function renderGrownups() {
   wireSignOut();
   document.getElementById("withdraw").onclick = () => show({ mode: "delete-account", back: { mode: "grownups" } });
   // Reloading the child picks up quiz settings and questions changed here or in the admin panel.
-  document.getElementById("done").onclick = () => step(async () => {
+  document.getElementById("back").onclick = () => step(async () => {
     if (!child) return show({ mode: "profiles" });
     await saving;
     await openProfile(profiles.find(p => p.id === child.id) ?? child);
@@ -774,6 +804,7 @@ function renderGrownups() {
 function renderDeleteAccount() {
   const names = profiles.map(p => esc(p.nickname));
   screen.innerHTML = `<div class="narrow">
+    ${backLink(app.back?.mode === "grownups" ? "Grown-ups" : "Back")}
     ${gbar()}<span class="label">Withdraw consent</span><h1>Delete everything?</h1>
     <p>This deletes, from Nitya's database:</p>
     <ul class="points">
@@ -784,20 +815,23 @@ function renderDeleteAccount() {
     ${profiles.length ? `<div class="row"><button class="ghost" type="button" id="dlall">${ICONS.download}Download all data first</button></div>` : ""}
     ${app.downloaded ? `<p class="note" role="status">Downloaded <b>nitya-family.json</b>, with ${profiles.length} ${profiles.length === 1 ? "child" : "children"}.</p>` : ""}
     <label for="confirmdel">Type DELETE to confirm</label>
-    <input id="confirmdel" type="text" autocomplete="off" autocapitalize="characters" value="">
+    <input id="confirmdel" type="text" autocomplete="off" autocapitalize="characters" value="" aria-describedby="delerr">
+    <p class="error" id="delerr" role="alert"></p>
     ${errorLine()}
-    <div class="row"><button class="ghost danger sure" type="button" id="reallydelete" disabled>${ICONS.trash}Delete everything</button>
+    <div class="row"><button class="ghost danger sure" type="button" id="reallydelete">${ICONS.trash}Delete everything</button>
       <button class="ghost quiet" type="button" id="nodelete">Cancel</button></div>
   </div>`;
   const typed = document.getElementById("confirmdel"), really = document.getElementById("reallydelete");
-  typed.oninput = () => { really.disabled = typed.value.trim().toUpperCase() !== "DELETE"; };
+  typed.oninput = () => { document.getElementById("delerr").textContent = ""; };
   const dl = document.getElementById("dlall");
   if (dl) dl.onclick = () => step(async () => {
     const children = await Promise.all(profiles.map(async p => ({ profile: p, ...(await backend.profileData(p.id)), quizSettings: await backend.childSettings(p.id) })));
     try { download("nitya-family.json", { exportedAt: new Date().toISOString(), email: account.email, consentVersion: account.consentVersion, children }); } catch (e) {}
     show({ ...app, downloaded: true, error: null });
   });
-  really.onclick = () => step(async () => {
+  document.getElementById("back").onclick = () => show(app.back);
+  // The button stays enabled, so pressing it early says what is missing instead of doing nothing.
+  really.onclick = () => typed.value.trim().toUpperCase() !== "DELETE" ? needWord(typed, "delerr", "Type DELETE to continue.") : step(async () => {
     const ids = profiles.map(p => p.id);
     await backend.deleteAccount();
     for (const id of ids) { try { storage.setItem(QUIZ_KEY(id), "null"); } catch (e) {} }
@@ -806,6 +840,12 @@ function renderDeleteAccount() {
     show({ mode: "signin", note: "Your account and all its data are deleted." });
   });
   document.getElementById("nodelete").onclick = () => show(app.back);
+}
+
+/** A guarded delete pressed before its word is typed: say so under the field, and put the cursor there. */
+function needWord(input, errId, text) {
+  document.getElementById(errId).textContent = text;
+  input.focus();
 }
 
 async function loadFamily() {
@@ -864,17 +904,10 @@ function renderChildProgress() {
   // Marks never go below 0, so a count of wrong first tries says more than the marks they took away.
   const quizzes = recent.filter(a => !a.practice), firsts = quizzes.flatMap(answersOf);
   const wrong = firsts.filter(r => !r.firstTryCorrect).length;
-  const day = iso => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-  const line = a => {
-    const rs = answersOf(a);
-    if (a.practice) {
-      const skill = rs[0] ? byId(a.topicId).subSkillNames[rs[0].subSkill] ?? rs[0].subSkill : "";
-      return `<li>${esc(day(a.startedAt))} · Practice${skill ? `: ${esc(skill)}` : ""} · ${rs.filter(r => r.firstTryCorrect).length} of ${rs.length}</li>`;
-    }
-    return `<li>${esc(day(a.startedAt))} · ${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}</li>`;
-  };
+  const line = a => playLine(a, answersOf(a), MAX);
   const next = M.nextClass(p.classId);
   screen.innerHTML = `<div class="narrow">
+    ${backLink("Grown-ups")}
     ${gbar()}<h1>${name}'s progress</h1>
     <p class="muted">${esc(className(p.classId))} · ${esc(familyLine(p, d))}. Each quiz needs ${app.passMarks} of ${MAX} marks.</p>
     ${s.promoted ? `<p class="note">${name} finished ${esc(className(p.classId))} Maths.${next ? ` ${esc(className(next))} opens when its topics are ready.` : ""}</p>` : ""}
@@ -884,11 +917,11 @@ function renderChildProgress() {
       ${open.length ? `<details class="disc"><summary>Get new questions for a topic</summary>
         <p class="small muted">Adds fresh questions to a topic ${name} has seen a lot of. Families can ask ${M.NEW_QUESTIONS_PER_DAY} times a day.</p>
         ${open.map(t => `<div class="prow"><span>${esc(t.title)}</span><button class="ghost quiet" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "Get new questions"}</button></div>`).join("")}</details>` : ""}</section>
-    <section class="setting"><h3>Improvement areas</h3>${areas || `<p class="small muted">Nothing to work on yet. Skills under 80% right show up here after a quiz.</p>`}</section>
+    <section class="setting"><h3>Improvement areas</h3><p class="small muted">From recent quizzes: a skill's last two plays, or its last one once the topic is cleared.</p>${areas || `<p class="small muted">Nothing to work on now. Skills under 80% right show up here after a quiz.</p>`}</section>
     <section class="setting"><h3>Right first time, by level</h3>${levelRows(s)}</section>
     <section class="setting"><h3>Recent quizzes</h3>
       ${recent.length ? `<ul class="qlog">${recent.map(line).join("")}</ul>` : `<p class="small muted">No quizzes yet.</p>`}
-      ${firsts.length ? `<p class="small muted">Wrong first tries in these quizzes: ${wrong} of ${firsts.length}. Each takes away ${app.penalty} ${app.penalty === 1 ? "mark" : "marks"} now, and marks never go below 0.</p>` : ""}</section>
+      ${firsts.length ? `<p class="small muted">Wrong first tries in these quizzes: ${wrong} of ${firsts.length}. Each takes away ${app.penalty} ${app.penalty === 1 ? "mark" : "marks"} now. Marks never go below 0, and a quiz that reaches the pass mark keeps it.</p>` : ""}</section>
     <div class="row"><button class="btn primary" type="button" id="done">Back to Grown-ups</button></div>
   </div>`;
   if (app.openTools) screen.querySelector(".disc")?.setAttribute("open", "");
@@ -898,10 +931,22 @@ function renderChildProgress() {
     if (app.mode === "child-progress") render();
   });
   document.getElementById("done").onclick = () => show({ mode: "grownups" });
+  document.getElementById("back").onclick = () => show({ mode: "grownups" });
+}
+
+/** Skills under 80% right first time in recent plays (see the summary's recentSkills), weakest first. */
+/** One play as one line, the same on the Progress page and in the data summary. */
+function playLine(a, rs, MAX) {
+  const day = new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  if (a.practice) {
+    const skill = rs[0] ? byId(a.topicId).subSkillNames[rs[0].subSkill] ?? rs[0].subSkill : "";
+    return `<li>${esc(day)} · Practice${skill ? `: ${esc(skill)}` : ""} · ${rs.filter(r => r.firstTryCorrect).length} of ${rs.length}</li>`;
+  }
+  return `<li>${esc(day)} · ${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}</li>`;
 }
 
 function weakAreas(s) {
-  return Object.entries(s.skills)
+  return Object.entries(s.recentSkills)
     .map(([k, v]) => { const [tid, skill] = k.split("|"); return { tid, skill, acc: v.right / v.total, total: v.total }; })
     .filter(a => a.total >= 2 && a.acc < 0.8 && s.progress.topics[a.tid])
     .sort((a, b) => a.acc - b.acc)
@@ -951,6 +996,7 @@ function renderChildSettings() {
   const seg = (attr, value, on, label, sub = "") => `<button class="ghost ${on ? "on" : ""}" type="button" ${attr}="${value}" aria-pressed="${on}">${label}${sub ? `<small>${sub}</small>` : ""}</button>`;
   const snap5 = v => Math.min(100, Math.max(5, Math.round(v / 5) * 5));
   screen.innerHTML = `<div class="narrow">
+    ${backLink("Grown-ups")}
     ${gbar()}<h1>Settings for ${name}</h1>
     <section class="setting">
       <h3>Profile</h3>
@@ -964,7 +1010,7 @@ function renderChildSettings() {
       <div class="choicegrid" role="group" aria-labelledby="passlbl">${presets.map(([v, label, sub]) => seg("data-pass", v ?? "default", passOn(v), label, sub)).join("")}${seg("data-pass", "custom", custom, "Custom", custom ? `${percent}%` : "Choose")}</div>
       ${custom ? `<div class="stepper" role="group" aria-label="Custom pass mark">
           <button class="ghost" type="button" data-passstep="-5" aria-label="5% lower" ${percent <= 5 ? "disabled" : ""}>−</button>
-          <b aria-live="polite">${percent}%</b>
+          <b aria-live="polite">${percent}%${percent === def.passPercent ? `<small>class default</small>` : ""}</b>
           <button class="ghost" type="button" data-passstep="5" aria-label="5% higher" ${percent >= 100 ? "disabled" : ""}>+</button></div>` : ""}
       <span class="sublabel" id="offlbl">Marks off for a wrong first try</span>
       <div class="segctl" role="group" aria-labelledby="offlbl">${[0, 1, 2].map(v => seg("data-pen", v, eff.wrongPenalty === v, v === 0 ? "None" : String(v), v === def.wrongPenalty ? "default" : "")).join("")}<button class="ghost ${eff.wrongPenalty > 2 ? "on" : ""}" type="button" data-moreoff aria-expanded="${moreOff}">More<small>3 or 4</small></button></div>
@@ -1000,8 +1046,9 @@ function renderChildSettings() {
         <p><b>Delete ${name}?</b> This removes ${name}'s profile, quiz results and progress from Nitya's database. It can't be undone.</p>
         <div class="row"><button class="ghost" type="button" data-download="${p.id}">${ICONS.download}Download ${name}'s data first</button></div>
         <label for="confirmname">Type ${name} to confirm</label>
-        <input id="confirmname" type="text" autocomplete="off" value="">
-        <div class="row"><button class="ghost danger sure" type="button" id="reallydelete" disabled>${ICONS.trash}Delete ${name}</button>
+        <input id="confirmname" type="text" autocomplete="off" value="" aria-describedby="delerr">
+        <p class="error" id="delerr" role="alert"></p>
+        <div class="row"><button class="ghost danger sure" type="button" id="reallydelete">${ICONS.trash}Delete ${name}</button>
           <button class="ghost quiet" type="button" id="nodelete">Cancel</button></div>`
         : `<p class="small muted">Deletes ${name}'s profile and progress for good.</p>
         <div class="row"><button class="ghost quiet danger" type="button" data-delete="${p.id}">${ICONS.trash}Remove ${name}…</button></div>`}
@@ -1034,8 +1081,8 @@ function renderChildSettings() {
   const typed = document.getElementById("confirmname");
   if (typed) {
     const really = document.getElementById("reallydelete");
-    typed.oninput = () => { really.disabled = typed.value.trim().toLowerCase() !== p.nickname.toLowerCase(); };
-    really.onclick = () => step(async () => {
+    typed.oninput = () => { document.getElementById("delerr").textContent = ""; };
+    really.onclick = () => typed.value.trim().toLowerCase() !== p.nickname.toLowerCase() ? needWord(typed, "delerr", `Type ${p.nickname} to continue.`) : step(async () => {
       await backend.deleteProfile(p.id);
       profiles = profiles.filter(x => x.id !== p.id);
       if (child && child.id === p.id) { child = null; data = null; sum = null; }
@@ -1045,6 +1092,7 @@ function renderChildSettings() {
     document.getElementById("nodelete").onclick = () => { app.confirmDelete = false; render(); };
   }
   document.getElementById("done").onclick = () => show({ mode: "grownups" });
+  document.getElementById("back").onclick = () => show({ mode: "grownups" });
 }
 
 function dataSummary(exp, MAX) {
@@ -1055,7 +1103,7 @@ function dataSummary(exp, MAX) {
     <ul class="points small"><li>Profile: ${esc(p.nickname)}, ${esc(className(p.classId))}, ${esc(boardName(p.board))}, ${esc(languageName(p.language))}, avatar ${esc(p.avatar)}</li>
       <li>${done.length} ${done.length === 1 ? "quiz" : "quizzes"} and ${v.responses.length} answers</li>
       <li>Quiz settings: ${v.quizSettings.passPercent === null ? "class default pass mark" : `${v.quizSettings.passPercent}% to pass`}, ${v.quizSettings.wrongPenalty === null ? "class default marks off" : `${v.quizSettings.wrongPenalty} off for a wrong first try`}, voice ${v.quizSettings.voice === null ? "as the look decides" : v.quizSettings.voice ? "on" : "off"}</li></ul>
-    ${done.length ? `<ul class="qlog">${done.slice(-8).reverse().map(a => `<li>${esc(new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))} · ${a.practice ? `Practice: ${esc(topicTitle(a.topicId))}` : `${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}`}</li>`).join("")}</ul>` : ""}
+    ${done.length ? `<ul class="qlog">${done.slice(-8).reverse().map(a => playLine(a, v.responses.filter(r => r.attemptId === a.id), MAX)).join("")}</ul>` : ""}
     <details><summary>Show the raw file</summary><pre class="data">${esc(JSON.stringify(v, null, 2))}</pre></details>
     <div class="row"><button class="ghost quiet" type="button" onclick="window.print()">Print this</button></div>
   </div>`;
@@ -1073,7 +1121,7 @@ function saveMine(def, choice) {
     await backend.saveChildSettings(profileId, next);
     app.mine = next;
     if (child && child.id === profileId) settings.child = next;
-    if (next.passPercent === null) app.customPass = false;
+    // The stepper stays open at the class default, so 70, 65, 60 is three taps; Default or a preset closes it.
     app.note = next.passPercent === null && next.wrongPenalty === null ? `Saved. ${app.profile.nickname} uses the class default.` : "Saved.";
     app.error = null;
     app.lookNote = null;
@@ -1141,12 +1189,15 @@ function reviewCard(e) {
   const q = e.question, c = byId(q.topicId);
   const problems = e.report ? M.reportProblems(e.report) : ["It has no check report."];
   const confirming = d => app.confirm === `${d}:${q.id}`;
+  // The stored answer is only the question's key, not a verified one: it is marked when the answer check disagrees.
+  const keyBad = !!e.report && !e.report.answer.passed;
   return `<div class="qcard">
     <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(c?.subSkillNames[q.subSkill] ?? q.subSkill)} · ${esc(sourceLabel(q))}</div>
     <p class="prompt">${promptHtml(q.prompt)}</p>
     ${dotsSvg(q.visual)}
-    ${q.options ? `<div class="optlist">${q.options.map(o => `<span class="${q.answers.includes(o) ? "ans" : ""}">${q.answers.includes(o) ? "✓ " : ""}${esc(o)}</span>`).join("")}</div>` : ""}
-    <p class="small">Answer given: <b>${esc(q.answers.join(", "))}</b></p>
+    ${q.options ? `<div class="optlist">${q.options.map(o => q.answers.includes(o)
+      ? `<span class="anskey ${keyBad ? "bad" : ""}">Key: ${esc(o)}${keyBad ? ` <b aria-label="the check disagrees">✗</b>` : ""}</span>`
+      : `<span>${esc(o)}</span>`).join("")}</div>` : `<p class="small">Key: <b>${esc(q.answers.join(", "))}</b></p>`}
     <ul class="problems">${problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
     <div class="row">
       ${M.canFixHere(q) ? `<button class="ghost tonal" type="button" data-fixq="${q.id}">${ICONS.edit}Fix</button>` : ""}
@@ -1213,7 +1264,7 @@ function renderAdmin() {
   });
   screen.querySelectorAll("[data-fixq]").forEach(b => b.onclick = () => {
     const entry = app.queue.find(e => e.question.id === b.dataset.fixq);
-    show({ mode: "fix", entry, edits: M.editsOf(entry.question), report: entry.report, candidate: null });
+    show({ mode: "fix", entry, edits: M.editsOf(entry.question), report: entry.report, candidate: null, manyAnswers: null, needAnswer: false });
   });
   const saveClasses = document.getElementById("saveclasses");
   if (saveClasses) saveClasses.onclick = () => {
@@ -1252,13 +1303,16 @@ function renderAdmin() {
   });
 }
 
-/** The Fix form's right answer: a tick box for each option, so it can't be something that isn't offered. */
-function answerPicks(e) {
+/**
+ * The Fix form's right answer, picked from the options so it can't be something that isn't offered: one choice,
+ * unless "More than one answer is right" is ticked, which turns them into tick boxes.
+ */
+function answerPicks(e, many) {
   const split = v => String(v ?? "").split("|").map(x => x.trim()).filter(Boolean);
   const answers = split(e.answers);
   const options = split(e.options);
   return options.length
-    ? options.map((o, i) => `<label class="pick"><input type="checkbox" data-ans value="${esc(o)}" ${answers.includes(o) ? "checked" : ""}><span>${esc(o)}</span></label>`).join("")
+    ? options.map(o => `<label class="pick"><input type="${many ? "checkbox" : "radio"}" name="rightans" data-ans value="${esc(o)}" ${answers.includes(o) ? "checked" : ""}><span>${esc(o)}</span></label>`).join("")
     : `<p class="small muted">Type the options first.</p>`;
 }
 
@@ -1277,13 +1331,16 @@ function renderFix() {
   const report = app.report;
   const checks = report ? Object.entries(CHECK_NAMES).map(([k, name]) => `<li class="${report[k].passed ? "ok" : "bad"}">${report[k].passed ? "✓" : "✗"} ${esc(name)}${report[k].problems.length ? `: ${esc(report[k].problems.join(" "))}` : ""}</li>`).join("") : "";
   const ready = app.candidate && app.report;
+  const many = app.manyAnswers ?? String(e.answers ?? "").split("|").filter(x => x.trim()).length > 1;
   screen.innerHTML = `<div class="narrow" style="max-width:720px">
     ${gbar()}<span class="label">Admin · Fix a question</span><h1>${esc(topicTitle(q.topicId))}</h1>
     <p class="small muted">${esc(sourceLabel(q))} · id ${esc(q.id)}</p>
     <form id="fixform" novalidate>
       ${text("prompt", "Question")}
       ${text("options", "Options", 'Separate them with "|", like 6 | 7 | 8.')}
-      <fieldset class="answerpick"><legend>Right answer</legend><div class="row" id="answerpick">${answerPicks(e)}</div></fieldset>
+      <fieldset class="answerpick" aria-describedby="anserr"><legend>Right answer</legend><div class="row" id="answerpick">${answerPicks(e, many)}</div>
+        <label class="check inline"><input type="checkbox" id="manyans" ${many ? "checked" : ""}> <span>More than one answer is right</span></label>
+        <p class="error" id="anserr" role="alert">${app.needAnswer ? "Pick the right answer." : ""}</p></fieldset>
       <label for="f-level">Level</label><select id="f-level">${[1, 2, 3, 4].map(l => `<option value="${l}" ${String(l) === e.level ? "selected" : ""}>L${l} ${LEVEL_NAMES[l]}</option>`).join("")}</select>
       <label for="f-subSkill">Skill</label><select id="f-subSkill">${Object.entries(c.subSkillNames).map(([id, name]) => `<option value="${esc(id)}" ${id === e.subSkill ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
       ${text("hint", "Hint after a wrong first try")}
@@ -1309,6 +1366,9 @@ function renderFix() {
   document.getElementById("check").onclick = () => {
     app.edits = read();
     app.confirmSave = false;
+    // A question needs a right answer before it can be checked.
+    app.needAnswer = !app.edits.answers;
+    if (app.needAnswer) { app.candidate = null; render(); screen.querySelector("[data-ans]")?.focus(); return; }
     try {
       app.candidate = M.applyEdits(q, app.edits);
       app.report = M.recheck(app.candidate, M.ALL_CONTENT.map(M.topicInfo));
@@ -1319,10 +1379,15 @@ function renderFix() {
     render();
   };
   // The right answer is picked from the options, so it always is one of them.
-  document.getElementById("f-options").addEventListener("input", () => {
-    const picked = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value).join(" | ");
-    document.getElementById("answerpick").innerHTML = answerPicks({ options: document.getElementById("f-options").value, answers: picked });
-  });
+  const repick = () => {
+    const picked = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value);
+    app.manyAnswers = document.getElementById("manyans").checked;
+    // Going back to one answer keeps only the first one ticked.
+    const answers = app.manyAnswers ? picked : picked.slice(0, 1);
+    document.getElementById("answerpick").innerHTML = answerPicks({ options: document.getElementById("f-options").value, answers: answers.join(" | ") }, app.manyAnswers);
+  };
+  document.getElementById("f-options").addEventListener("input", repick);
+  document.getElementById("manyans").addEventListener("change", repick);
   // Changing a field after a check means checking again before saving.
   screen.querySelector("#fixform").addEventListener("input", () => {
     if (!app.candidate) return;
@@ -1416,6 +1481,7 @@ function dropQuiz(key) {
 function nextQ() {
   app.prevMarks = app.state.marks;
   // The playful meter catches up with any mark taken away here, on the new question, without going backwards in view.
+  // Once the pass mark is reached nothing takes the quiz back below it, so the flag, once reached, stays.
   app.meter = app.state.marks;
   app.meterFrom = app.meter;
   app.delta = null;
@@ -1425,9 +1491,13 @@ function nextQ() {
   app.fbText = "";
   app.tries = [];
   app.picked = null;
+  app.counted = [];
   keepQuiz();
   render();
 }
+
+/** The question showing, counted from 0: the dot or segment that stays marked "now" until Next. */
+const questionAt = () => app.state.asked.length - (app.phase === "ask" ? 0 : 1);
 
 /** Saves the question just finished, with its retry if there was one. */
 function saveResponse(q) {
@@ -1484,6 +1554,10 @@ function renderDash() {
   const pass = quizSettings().passMarks;
   const upNext = topics.find(t => sum.progress.topics[t.id].state === "current");
   const starText3 = n => `${"★".repeat(n)}${"☆".repeat(3 - n)}`;
+  const areas = weakAreas(sum);
+  // After two quizzes that didn't clear, the result offers practice first, so the playful map does too, in the same order.
+  const offered = play && upNext && sum.progress.topics[upNext.id].attempts >= M.PRACTICE_AFTER_FAILS && !keptQuiz(upNext.id)
+    ? areas.find(a => a.tid === upNext.id) : null;
 
   const rows = topics.map((t, i) => {
     const e = sum.progress.topics[t.id];
@@ -1491,9 +1565,10 @@ function renderDash() {
     const kept = e.state === "locked" ? null : keptQuiz(t.id);
     const bestPct = Math.min(100, (e.bestScore / MAX) * 100);
     const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
-    const starsHtml = stars ? `<span class="stars-sm" role="img" aria-label="${stars} of 3 stars"><span aria-hidden="true">${starText3(stars)}</span></span>` : "";
+    const starsHtml = stars ? starRow(stars) : "";
     // What the button does: carry on a kept quiz, start or retry the topic, or play a cleared one again straight away.
     const verb = kept ? "Carry on" : e.state === "cleared" ? word("again") : e.attempts ? word("retry") : "Start";
+    const first = offered && t.id === upNext.id;
     const ring = e.state === "cleared" ? 100 : Math.round(bestPct);
     const glyph = e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1;
     if (!play) {
@@ -1506,24 +1581,28 @@ function renderDash() {
       return `<button class="topic ${e.state} slim rowbtn" type="button" data-play="${t.id}" aria-label="${esc(label)}">${body}${ICONS.chev}</button>`;
     }
     // Playful: the trail. Each stop's round node reads its name and state aloud.
-    const said = e.state === "cleared" ? `${t.title}. Done! ${starText(stars)}.` : e.state === "current" ? `${t.title}. Up next! Tap ${verb}.` : `${t.title}. Locked. Finish the topics before it first.`;
+    const said = e.state === "cleared" ? `${t.title}. Done! ${starText(stars)}.` : e.state === "current" ? `${t.title}. Up next! Tap ${first ? "Practise first" : verb}.` : `${t.title}. Locked. Finish the topics before it first.`;
     const node = `<button class="num" type="button" style="--p:${ring}" data-say="${esc(said)}" aria-label="Listen: ${esc(t.title)}">${glyph}<span class="nodesay" aria-hidden="true">${SPEAKER}</span></button>`;
-    const score = kept ? `<span>${keptAt(kept)}</span>` : e.attempts ? starsHtml || `<span>${e.attempts} ${e.attempts === 1 ? "try" : "tries"}</span>` : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
-    const act = e.state === "locked" ? "" : `<button class="chipbtn ${e.state === "cleared" && !kept ? "soft" : ""}" type="button" data-play="${t.id}">${verb}</button>`;
+    // A young child's map doesn't count failed tries; those are on the grown-ups' Progress page.
+    const score = kept ? `<span>${keptAt(kept)}</span>` : e.attempts ? starsHtml : e.state === "locked" ? `<span>Opens after topic ${i}</span>` : `<span>Not started</span>`;
+    const act = e.state === "locked" ? "" : first
+      ? `<button class="chipbtn" type="button" data-practice="${offered.tid}|${offered.skill}">Practise first</button><button class="chipbtn soft" type="button" data-play="${t.id}">${verb}</button>`
+      : `<button class="chipbtn ${e.state === "cleared" && !kept ? "soft" : ""}" type="button" data-play="${t.id}">${verb}</button>`;
     return `<div class="topic ${e.state}">${node}
       <div class="tmain"><div class="row" style="gap:8px"><h3>${esc(t.title)}</h3>${chip}</div><div class="tmeta">${score}</div></div>
       <div class="act">${act}</div></div>`;
   });
 
-  const areas = weakAreas(sum);
   const weakest = areas.find(a => sum.progress.topics[a.tid].state !== "locked");
   const cls = className(child.classId);
-  // The owl's practice card sits on the trail, just under the "Up next" stop, where a child looks next.
-  if (play && weakest) {
+  // The owl's practice card sits on the trail, just under the "Up next" stop, where a child looks next. Its button is
+  // the white one, so the next stop keeps the one green button; when the stop itself says "Practise first" the card
+  // would only repeat it, so it is left out.
+  if (play && weakest && !offered) {
     const skill = (byId(weakest.tid).subSkillNames[weakest.skill] || weakest.skill).toLowerCase();
     const keptP = keptQuiz(quizKey(weakest.tid, weakest.skill));
     const card = `<div class="trail-extra"><div class="mascot">${owl("think")}<div class="bubble"><h2>Let's practise ${esc(skill)}!</h2>${sayBtn(`Let's practise ${skill}!`)}
-      <div class="row"><button class="btn primary" type="button" data-practice="${weakest.tid}|${weakest.skill}">${keptP ? "Carry on" : "Play"}</button></div></div></div></div>`;
+      <div class="row"><button class="chipbtn soft" type="button" data-practice="${weakest.tid}|${weakest.skill}">${keptP ? "Carry on" : "Play"}</button></div></div></div></div>`;
     const at = upNext ? topics.indexOf(upNext) + 1 : rows.length;
     rows.splice(at, 0, card);
   }
@@ -1553,7 +1632,7 @@ function renderDash() {
     </section>
     <div class="topics">${rows.join("")}</div>
     ${play ? "" : `<div class="panels">
-      <div class="panel"><span class="label">Improvement areas</span>${areas.length ? areas.map(a => {
+      <div class="panel"><span class="label">Improvement areas</span><p class="small muted">From recent quizzes.</p>${areas.length ? areas.map(a => {
         const c = byId(a.tid);
         const open = sum.progress.topics[a.tid].state !== "locked";
         return `<div class="area"><div><b>${esc(c.subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(c.topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
@@ -1572,7 +1651,8 @@ function renderDash() {
   document.getElementById("grownups").onclick = () => askPin("To open the grown-ups' page.", () => show({ mode: "grownups" }));
   if (play && upNext) {
     const k = keptQuiz(upNext.id);
-    autoSay(`dash${upNext.id}${k ? "k" : ""}`, k ? `Carry on with ${upNext.title}!` : `Up next: ${upNext.title}!`);
+    const skill = offered ? (byId(offered.tid).subSkillNames[offered.skill] || offered.skill).toLowerCase() : "";
+    autoSay(`dash${upNext.id}${k ? "k" : ""}${offered ? "p" : ""}`, k ? `Carry on with ${upNext.title}!` : offered ? `Up next: ${upNext.title}! Let's practise ${skill} first.` : `Up next: ${upNext.title}!`);
   }
 }
 
@@ -1589,21 +1669,17 @@ function renderLesson() {
   if (app.page < pages.length) {
     const p = pages[app.page];
     const count = app.counted ?? [];
-    const total = p.visual ? p.visual.groups.reduce((a, g) => a + g.count, 0) : 0;
+    const total = p.visual ? countable(p.visual) : 0;
     const ready = !p.visual || count.length === total;
     screen.innerHTML = `${crumbs}
       <div class="mascot">${MASCOT}<div class="bubble"><h2 tabindex="-1">${esc(p.title)}</h2><p>${esc(p.text)}</p>${sayBtn(`${p.title}. ${p.text}`)}</div></div>
-      ${p.visual ? `${tapDots(p.visual, count)}<p class="small muted center" aria-live="polite">${count.length ? `${count.length} counted` : "Tap each dot to count it."}</p>` : ""}
+      ${p.visual ? `${tapDots(p.visual, count)}<p class="small muted center" id="counted" aria-live="polite">${count.length ? `${count.length} counted` : "Tap each dot to count it."}</p>` : ""}
       <div class="row lessonnav">${app.page > 0 ? `<button class="ghost" type="button" id="back">Back</button>` : ""}
         <button class="btn primary ${ready && p.visual ? "ready" : ""}" type="button" id="next">Next</button></div>`;
     autoSay(`lesson${app.topicId}${app.page}`, `${p.title}. ${p.text}`);
-    screen.querySelectorAll("[data-dot]").forEach(b => b.onclick = () => {
-      const k = b.dataset.dot;
-      if (count.includes(k)) return;
-      app.counted = [...count, k];
-      if (childVoice()) speak(NUMBER_WORDS[app.counted.length - 1] ?? String(app.counted.length));
-      render();
-      document.querySelector(`[data-dot="${k}"]`)?.focus();
+    wireTapDots(n => {
+      document.getElementById("counted").textContent = `${n} counted`;
+      if (n === total) document.getElementById("next").classList.add("ready");
     });
     document.getElementById("next").onclick = () => { app.page++; app.counted = []; render(); };
     const back = document.getElementById("back");
@@ -1619,20 +1695,21 @@ function renderLesson() {
       ? `<button class="btn primary" type="button" id="go">Carry on from question ${kept.phase === "ask" ? kept.state.asked.length + 1 : kept.state.asked.length}</button><button class="ghost" type="button" id="fresh">Start again</button>`
       : `<button class="btn primary" type="button" id="go">${app.peek ? "Back to my question" : "Start the quiz"}</button>`;
     screen.innerHTML = `${crumbs}
-      <div class="mascot">${MASCOT}<div class="bubble"><span class="label">Try it</span><p class="prompt" tabindex="-1">${promptHtml(t.prompt)}</p>${sayBtn(t.prompt)}</div></div>
-      ${dotsSvg(t.visual)}
+      <div class="mascot">${MASCOT}<div class="bubble"><span class="label">Try it</span><p class="${promptClass(t.prompt)}" tabindex="-1">${promptHtml(t.prompt)}</p>${sayBtn(t.prompt)}</div></div>
+      ${quizDots(t.visual)}
       ${optionButtons(t.options, "data-try", { disabled: got, tried: wrong, right: got ? [t.answer] : null, picked: got ? t.answer : null })}
-      <div id="tryfb">${got ? feedbackCard("good", "You got it!", esc(t.praise)) : wrong.length ? feedbackCard("gentle", "Let's look again.", `${esc(t.help)} Try again!`) : ""}</div>
+      <div id="tryfb">${got ? feedbackCard("good", "You got it!", esc(t.praise)) : wrong.length ? feedbackCard("gentle", "Let's look again.", `${esc(hintFor(t.help, t.visual))} Try again!`) : ""}</div>
       <div class="row actions">${goRow}
         <button class="ghost" type="button" id="back">Back</button></div>`;
     autoSay(`try${app.topicId}`, t.prompt);
+    wireTapDots();
     document.getElementById("back").onclick = () => { app.page--; app.tryPicks = []; render(); };
     screen.querySelectorAll("[data-try]:not([disabled])").forEach(b => b.onclick = () => {
       const ok = b.dataset.try === t.answer;
       app.tryPicks = [...picks, b.dataset.try];
       chime(ok ? "good" : "gentle");
       render();
-      const text = ok ? `You got it! ${t.praise}` : `Let's look again. ${t.help} Try again!`;
+      const text = ok ? `You got it! ${t.praise}` : `Let's look again. ${hintFor(t.help, t.visual)} Try again!`;
       announce(text);
       autoSay(`try${app.topicId}${app.tryPicks.length}`, text);
       afterAnswer(ok ? document.getElementById("go") : screen.querySelector("[data-try]:not([disabled])"));
@@ -1648,13 +1725,65 @@ function renderLesson() {
   if (bq) bq.onclick = backToQuiz;
 }
 
-function tapDots(visual, counted) {
-  return `<div class="visual tapdots">${visual.groups.map((g, gi) => `<div class="dotgroup">${Array.from({ length: g.count }, (_, i) => {
+/**
+ * Dots a child taps to count: each lights up with its number, and the voice says it. Crossed-out dots are only a
+ * picture, so they can't be counted by mistake. `compact` is the quiz's size: rows of 5, with groups side by side.
+ */
+function tapDots(visual, counted, compact = false) {
+  const cols = compact ? dotCols(visual.groups) : visual.groups.map(g => Math.min(5, g.count));
+  return `<div class="visual tapdots ${compact ? "compact" : ""}">${visual.groups.map((g, gi) => `<div class="dotgroup" style="--cols:${cols[gi]}">${Array.from({ length: g.count }, (_, i) => {
     const k = `${gi}-${i}`, n = counted.indexOf(k);
     const crossed = g.crossed && i >= g.count - g.crossed;
-    return `<button class="tapdot ${g.color} ${n >= 0 ? "counted" : ""} ${crossed ? "crossed" : ""}" type="button" data-dot="${k}" aria-label="${n >= 0 ? `Counted, ${n + 1}` : `${g.color} dot${crossed ? ", crossed out" : ""}`}">${n >= 0 ? n + 1 : ""}</button>`;
+    if (crossed) return `<span class="tapdot ${g.color} crossed" role="img" aria-label="${g.color} dot, crossed out"></span>`;
+    return `<button class="tapdot ${g.color} ${n >= 0 ? "counted" : ""}" type="button" data-dot="${k}" aria-label="${n >= 0 ? `Counted, ${n + 1}` : `${g.color} dot`}">${n >= 0 ? n + 1 : ""}</button>`;
   }).join("")}</div>`).join("")}</div>`;
 }
+/**
+ * Columns for each group in a quiz: one group in rows of 5; two groups side by side in 6 columns between them (all
+ * that fit on a 360px phone), split for the fewest rows, so 7 and 3 make two rows of 4 + 2.
+ */
+function dotCols(groups) {
+  const n = groups.map(g => g.count);
+  if (n.length !== 2) return n.map(c => Math.min(5, c));
+  if (n[0] + n[1] <= 6) return n;
+  let best = null;
+  for (let a = 1; a <= Math.min(5, n[0]); a++) {
+    const b = Math.min(6 - a, n[1]);
+    const rows = Math.max(Math.ceil(n[0] / a), Math.ceil(n[1] / b));
+    if (b >= 1 && (!best || rows < best.rows)) best = { rows, cols: [a, b] };
+  }
+  return best.cols;
+}
+const countable = visual => visual.groups.reduce((a, g) => a + g.count - (g.crossed || 0), 0);
+
+/** Counts a tapped dot where it is, without rebuilding the screen. `onCount` gets how many are counted now. */
+function wireTapDots(onCount) {
+  screen.querySelectorAll("[data-dot]").forEach(b => b.onclick = () => {
+    const count = app.counted ?? [];
+    if (count.includes(b.dataset.dot)) return;
+    app.counted = [...count, b.dataset.dot];
+    const n = app.counted.length;
+    if (childVoice()) speak(NUMBER_WORDS[n - 1] ?? String(n));
+    b.classList.add("counted");
+    b.textContent = n;
+    b.setAttribute("aria-label", `Counted, ${n}`);
+    onCount?.(n);
+  });
+}
+
+/** Playful: a picture of up to 10 dots is tap-to-count, as in the lesson. More than that stays a picture in rows of 10. */
+function quizDots(visual) {
+  if (!visual) return "";
+  const total = visual.groups.reduce((a, g) => a + g.count, 0);
+  return look() === "play" && total <= 10 ? tapDots(visual, app.counted ?? [], true) : dotsSvg(visual);
+}
+
+/** "Touch each dot" only where the dots can be tapped; a picture of dots is pointed at instead. */
+const hintFor = (text, visual) => quizDots(visual).includes("tapdot") ? text : text.replace(/^Touch (each|every) dot/, "Point at $1 dot");
+
+/** A hint's run of ● drawn as dots in rows of 5, so a child can count the amount without losing their place. */
+const hintHtml = text => esc(text).replace(/(●+)\.?\s*/g, (_, m) =>
+  `<span class="hintdots" style="--cols:${Math.min(5, m.length)}" role="img" aria-label="${NUMBER_WORDS[m.length - 1] ?? m.length} dots">${"<i></i>".repeat(m.length)}</span>`);
 
 function afterAnswer(target) {
   // Show the feedback and the next step, and move focus to it, without jumping the question off a tall screen.
@@ -1668,11 +1797,26 @@ function afterAnswer(target) {
 
 function backToQuiz() { app = app.saved; app.prevMarks = app.state.marks; render(); }
 
-/** Playful: one goal bar that fills up to the flag at its end, so reaching the flag means a full bar. */
-function goalMeter(marks, pass, { from = marks, id = "", total = 0, done = 0 } = {}) {
+/**
+ * Playful: one goal bar that fills up to the flag at its end, so reaching the flag means a full bar. In a quiz
+ * (`stars`), from the question after the flag the bar becomes the three stars: the first is earned with the flag,
+ * which the quiz keeps (see the engine), and the other two fill on the way to 53 and 62 marks.
+ */
+function goalMeter(marks, pass, { from = marks, id = "", total = 0, at = 0, stars = false } = {}) {
   const pct = v => (Math.min(v, pass) / pass) * 100;
   const reached = marks >= pass;
-  const dots = total ? `<div class="qdots" aria-hidden="true">${Array.from({ length: total }, (_, i) => `<span class="${i < done ? "done" : i === done ? "now" : ""}"></span>`).join("")}</div>` : "";
+  const dots = total ? `<div class="qdots" aria-hidden="true">${Array.from({ length: total }, (_, i) => `<span class="${i < at ? "done" : i === at ? "now" : ""}"></span>`).join("")}</div>` : "";
+  if (stars && reached && from >= pass) {
+    // How full each of the next two stars is, from 0 to 100. A pass mark set above 53 or 62 earns them with the flag.
+    const part = (lo, hi, m) => (hi <= lo ? (m >= hi ? 100 : 0) : Math.max(0, Math.min(100, ((m - lo) / (hi - lo)) * 100)));
+    const spans = [[pass, M.TWO_STARS], [Math.max(pass, M.TWO_STARS), M.THREE_STARS]];
+    // The star that moved last fills while the child watches; one passed on the way is already full.
+    const moving = id ? spans.map(([lo, hi]) => part(lo, hi, from) !== part(lo, hi, marks)).lastIndexOf(true) : -1;
+    const slots = spans.map(([lo, hi], i) => `<span class="starslot">${starSvg(false, 36)}<span class="starfill" ${i === moving ? `id="${id}" data-to="${part(lo, hi, marks)}"` : ""} style="width:${i === moving ? part(lo, hi, from) : part(lo, hi, marks)}%">${starSvg(true, 36)}</span></span>`);
+    const earned = 1 + (marks >= M.TWO_STARS) + (marks >= M.THREE_STARS);
+    return `<div class="marks meter goal starsphase">
+      <div class="starrow" role="img" aria-label="Flag reached! ${earned} of 3 stars so far"><span class="flagdone">${FLAG}</span>${starSvg(true, 36)}${slots.join("")}</div>${dots}</div>`;
+  }
   return `<div class="marks meter goal">
     <div class="track" role="progressbar" aria-label="On the way to the flag" aria-valuemin="0" aria-valuemax="${pass}" aria-valuenow="${Math.min(marks, pass)}">
       <div class="fill ${reached ? "qualified" : ""}" ${id ? `id="${id}" data-to="${pct(marks)}"` : ""} style="width:${pct(from)}%"></div>
@@ -1684,9 +1828,9 @@ function marksBar() {
   const MAX = maxMarks();
   const PASS = s.passMarks;
   if (look() === "play") {
-    // A wrong first try never moves the bar back: the meter only grows while a question is open, and catches up on the next one.
-    const done = s.asked.length - (app.phase === "retry" ? 1 : 0);
-    return goalMeter(app.meter ?? s.marks, PASS, { from: app.meterFrom ?? app.meter ?? s.marks, id: "fill", total: M.QUIZ_LENGTH, done });
+    // A wrong first try never moves the bar back while the child watches: the meter only grows while a question is
+    // open, and catches up on the next one. The dot for the question showing stays ringed until Next.
+    return goalMeter(app.meter ?? s.marks, PASS, { from: app.meterFrom ?? app.meter ?? s.marks, id: "fill", total: M.QUIZ_LENGTH, at: questionAt(), stars: true });
   }
   const passPct = (PASS / MAX) * 100;
   const q = s.marks >= PASS;
@@ -1697,7 +1841,7 @@ function marksBar() {
       <div class="row" style="gap:8px"><span class="label">Marks</span><span class="marks-num">${s.marks}</span>${deltaHtml}</div>
       <span class="qual ${q ? "yes" : ""}">${q ? "Pass mark crossed!" : `${PASS - s.marks} more to pass`}</span>
       <details class="howmarks"><summary><span class="hm-long">How marks work</span><span class="hm-short" aria-hidden="true">How?</span></summary>
-        <p class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away ${s.wrongPenalty}; the second try is for practice.</p></details>
+        <p class="small muted">Right answers: Easy +1, Medium +2, Hard +3, Olympiad +4. A wrong first try takes away ${s.wrongPenalty}; the second try is for practice. Once you reach the pass mark, you keep it.</p></details>
     </div>
     <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${MAX}" aria-valuenow="${s.marks}" aria-label="Marks: ${s.marks}, ${PASS} to pass">
       <div class="fill ${q ? "qualified" : ""}" id="fill" data-to="${(Math.min(s.marks, MAX) / MAX) * 100}" style="width:${(Math.min(app.prevMarks, MAX) / MAX) * 100}%"></div>
@@ -1713,9 +1857,11 @@ function renderQuiz() {
   const qNo = app.phase === "ask" ? s.asked.length + 1 : s.asked.length;
   const locked = app.phase === "done";
   const c = byId(app.topicId);
-  const done = s.asked.length - (app.phase === "retry" ? 1 : 0);
+  const done = s.asked.length - (app.phase === "retry" ? 1 : 0), at = questionAt();
   const play = look() === "play";
-  const tag = practice ? `<span class="lvl practice">Practice · no marks</span>` : `<span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span>`;
+  // The playful look keeps marks out of a young child's way: no level, no worth, and no "no marks" chip in practice,
+  // whose header already says "Practice".
+  const tag = play ? "" : practice ? `<span class="lvl practice">Practice · no marks</span>` : `<span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span>`;
   screen.innerHTML = `
     <div class="qtop">
       <div class="qtitle"><span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(c.subSkillNames[app.practiceSkill])}` : ""}</span>
@@ -1724,11 +1870,11 @@ function renderQuiz() {
       <button class="ghost iconbtn" type="button" id="stopq" aria-label="Stop the quiz">${ICONS.close}<span class="lbl">Stop</span></button></div>
     ${app.confirmStop ? stopCard("Stop now?", `You can carry on later from question ${qNo}.`, "Stop") : ""}
     ${play && !practice ? "" : `<div class="qprog" role="progressbar" aria-label="Questions done" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">${
-      Array.from({ length: total }, (_, i) => `<span class="${i < done ? "done" : i === done ? "now" : ""}"></span>`).join("")}</div>`}
+      Array.from({ length: total }, (_, i) => `<span class="${i < at ? "done" : i === at ? "now" : ""}"></span>`).join("")}</div>`}
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
     ${practice ? "" : marksBar()}
-    <div class="mascot">${MASCOT}<div class="bubble">${tag}<p class="prompt" tabindex="-1">${promptHtml(q.prompt)}</p>${sayBtn(app.fbText ? `${q.prompt} ${app.fbText}` : q.prompt)}</div></div>
-    ${dotsSvg(q.visual)}
+    <div class="mascot">${MASCOT}<div class="bubble">${tag}<p class="${promptClass(q.prompt)}" tabindex="-1">${promptHtml(q.prompt)}</p>${sayBtn(app.fbText ? `${q.prompt} ${app.fbText}` : q.prompt)}</div></div>
+    ${quizDots(q.visual)}
     ${optionButtons(q.options, "data-opt", { disabled: locked, tried: app.tries ?? [], right: locked ? q.answers : null, picked: app.picked })}
     ${locked ? "" : keyHint(q.options.length)}
     <div id="fb">${app.feedback ?? ""}</div>
@@ -1746,6 +1892,7 @@ function renderQuiz() {
   const fill = document.getElementById("fill");
   if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = fill.dataset.to + "%"; }));
 
+  wireTapDots();
   document.getElementById("relesson").onclick = () => { const saved = app; app = { mode: "lesson", topicId: saved.topicId, page: 0, peek: true, saved }; render(); };
   document.getElementById("stopq").onclick = () => { app.confirmStop = true; render(); document.getElementById("keepon")?.focus(); };
   wireStopCard(() => { keepQuiz(); goDash(); }, "stopq");
@@ -1779,8 +1926,9 @@ function answer(choice) {
       // the playful look keeps marks out of a young child's way.
       const cost = -r.result.marksDelta;
       const note = look() === "play" ? "" : cost > 0 ? `That try cost ${cost} ${cost === 1 ? "mark" : "marks"}. Your next try is just for practice.` : "Your next try is just for practice.";
-      app.feedback = feedbackCard("gentle", "Nice try! Here's a hint.", `${esc(r.result.hint)} Have another go.`, note);
-      app.fbText = `Nice try! Here's a hint. ${r.result.hint} Have another go.`;
+      const hint = hintFor(r.result.hint, q.visual);
+      app.feedback = feedbackCard("gentle", "Nice try! Here's a hint.", `${hintHtml(hint)} Have another go.`, note);
+      app.fbText = `Nice try! Here's a hint. ${hint} Have another go.`;
     }
   } else if (app.phase === "retry") {
     const r = M.answerRetry(app.state, q, choice);
@@ -1812,35 +1960,40 @@ function renderResult() {
   const cls = className(child.classId);
   const play = look() === "play";
   const passPct = (o.passMarks / MAX) * 100;
+  // Clean: the marks, the bar with its pass tick, and right first time, each said once.
   const bar = `<div class="marks"><div class="marks-top"><div><span class="label">Final marks</span><div class="marks-num">${o.marks} / ${MAX}</div></div>
-      <span class="${o.cleared ? "qual yes" : "small muted"}">${o.cleared ? "Above the pass mark" : `Pass mark ${o.passMarks}`}</span></div>
-    <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>${play ? FLAG : `Pass ${o.passMarks}`}</span></div></div>
+      ${o.cleared ? `<span class="qual yes">Above the pass mark</span>` : ""}</div>
+    <div class="track"><div class="fill ${o.cleared ? "qualified" : ""}" style="width:${(o.marks / MAX) * 100}%"></div><div class="passmark ${o.cleared ? "crossed" : ""}" style="left:${passPct}%"><span>Pass ${o.passMarks}</span></div></div>
     <div class="small muted">${o.correct} of ${M.QUIZ_LENGTH} right first time</div></div>`;
   // Playful: the goal bar and the flag, without numbers a young child can't read yet. Grown-ups see the marks on the Progress page.
   const shownBar = play ? goalMeter(o.marks, o.passMarks) : bar;
   const nextStar = !play && o.cleared && o.stars < 3 ? `<p class="small muted center">Next star at ${o.stars === 1 ? M.TWO_STARS : M.THREE_STARS} marks.</p>` : "";
+  // Every result can be heard again, as the map, the quiz and the Stop card can.
+  const bubble = (mood, title, body) => `<div class="mascot">${owl(mood)}<div class="bubble"><h2 tabindex="-1">${esc(title)}</h2><p>${esc(body)}</p>${sayBtn(`${title} ${body}`)}</div></div>`;
+  let said;
 
   if (o.cleared && effect.kind === "promoted") {
     const next = effect.to ? className(effect.to) : null;
+    const topics = topicList();
     const total = Object.values(sum.stars).reduce((a, b) => a + b, 0);
-    // Playful: plain words for a 5-year-old and the stars earned; what opens next is for grown-ups, on the Progress page.
-    screen.innerHTML = play ? `
-      <div class="cert">${owl("happy")}<span class="label">Certificate</span><h1 tabindex="-1">You finished ${esc(cls)} Maths!</h1>
-        <p>${esc(child.nickname)} cleared all ${topicList().length} topics.</p>
-        ${starsHtml(o.stars)}
-        <p class="bigstat"><span class="starglyph" aria-hidden="true">★</span> ${total} stars in all</p></div>
-      <div class="row actions"><button class="btn primary" type="button" id="dash">Back to my map</button></div>` : `
-      <div class="cert"><span class="label">Certificate</span><h1 tabindex="-1">${esc(cls)} Maths complete!</h1>
-        <p>${esc(child.nickname)} cleared all ${topicList().length} topics.${next ? ` Ready for ${esc(next)}.` : ""}</p>
-        ${starsHtml(o.stars)}
-        ${next ? `<p class="small muted">${esc(next)} opens when its topics are ready.</p>` : ""}</div>
-      ${shownBar}
-      <div class="row actions"><button class="btn primary" type="button" id="dash">${word("map")}</button></div>`;
-    autoSay(`result${app.topicId}`, play ? `You finished ${cls} Maths! ${total} stars in all.` : `${cls} Maths complete!`);
+    // The certificate shows the class: a tick for every topic and the stars from all of them, not the last quiz's.
+    const ticks = `<div class="ticks" role="img" aria-label="All ${topics.length} topics cleared">${topics.map(() => `<span aria-hidden="true">✓</span>`).join("")}</div>`;
+    const starLine = `<p class="bigstat"><span class="starglyph" aria-hidden="true">★</span> ${total} of ${topics.length * 3} stars</p>`;
+    const title = play ? `You finished ${cls} Maths!` : `${cls} Maths complete!`;
+    said = play ? `${title} ${total} stars in all.` : `${title} ${child.nickname} cleared all ${topics.length} topics.`;
+    // Playful: plain words for a 5-year-old; what opens next is for grown-ups, on the Progress page.
+    screen.innerHTML = `
+      <div class="cert">${owl("happy")}<span class="label">Certificate</span><h1 tabindex="-1">${esc(title)}</h1>${sayBtn(said)}
+        <p>${esc(child.nickname)} cleared all ${topics.length} topics.${!play && next ? ` Ready for ${esc(next)}.` : ""}</p>
+        ${ticks}${starLine}
+        ${!play && next ? `<p class="small muted">${esc(next)} opens when its topics are ready.</p>` : ""}</div>
+      <div class="row actions"><button class="btn primary" type="button" id="dash">${play ? "Back to my map" : word("map")}</button></div>`;
   } else if (o.cleared) {
     const next = byId(effect.topicId);
+    const body = `${c.topic.title} is done. The next topic is open.`;
+    said = `Topic cleared! ${body}`;
     screen.innerHTML = `
-      <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">Topic cleared!</h2><p>${esc(c.topic.title)} is done. The next topic is open.</p></div></div>
+      ${bubble("happy", "Topic cleared!", body)}
       ${starsHtml(o.stars)}${nextStar}
       ${shownBar}
       <div class="row actions">
@@ -1849,19 +2002,27 @@ function renderResult() {
         <button class="ghost" type="button" id="again">${word("again")}</button>
       </div>`;
     document.getElementById("nexttopic").onclick = () => openTopic(next.topic.id);
-    autoSay(`result${app.topicId}`, `Topic cleared! ${c.topic.title} is done.`);
   } else {
     const weak = o.weakSubSkills[0];
     const practise = o.offerPractice && weak;
+    const skill = weak ? (c.subSkillNames[weak] || weak).toLowerCase() : "";
     const close = o.marks >= o.passMarks * 0.75;
-    const title = close ? "So close!" : practise ? "Good effort! Let's practise first." : "Good effort! Let's have another go.";
-    // A young child isn't told "0 right": under 5, the owl praises the effort instead.
-    const body = play ? (o.correct < 5 ? "You tried every question!" : `You got ${o.correct} right first time.`) : `You got ${o.correct} of ${M.QUIZ_LENGTH} right first time. You need ${o.passMarks} marks to open the next topic, and harder questions give more marks.`;
+    let title, body;
+    if (play) {
+      title = close ? "So close!" : practise ? "Good effort! Let's practise first." : "Good effort! Let's have another go.";
+      // A young child isn't told "0 right": under 5, the owl praises the effort instead.
+      body = o.correct < 5 ? "You tried every question!" : `You got ${o.correct} right first time.`;
+    } else {
+      // Clean: plain words for 11 to 17, by how near the pass mark the quiz came.
+      title = close ? "So close!" : o.marks >= o.passMarks / 2 ? "Good effort!" : "Not cleared yet";
+      body = `You need ${o.passMarks} marks to clear this topic. Harder questions give more.${practise ? ` Practising ${skill} first can help.` : ""}`;
+    }
+    said = `${title} ${body}`;
     screen.innerHTML = `
-      <div class="mascot">${owl("think")}<div class="bubble"><h2 tabindex="-1">${title}</h2><p>${body}</p></div></div>
+      ${bubble("think", title, body)}
       ${shownBar}
       <div class="row actions">
-        ${practise ? `<button class="btn primary" type="button" id="practice">${keptQuiz(quizKey(app.topicId, weak)) ? "Carry on practising" : "Practise"} ${esc((c.subSkillNames[weak] || weak).toLowerCase())}</button>` : ""}
+        ${practise ? `<button class="btn primary" type="button" id="practice">${keptQuiz(quizKey(app.topicId, weak)) ? "Carry on practising" : "Practise"} ${esc(skill)}</button>` : ""}
         <button class="${practise ? "ghost" : "btn primary"}" type="button" id="lesson">Watch the lesson again</button>
         <button class="ghost" type="button" id="again">Try with new questions</button>
         <button class="ghost" type="button" id="dash">${word("map")}</button>
@@ -1869,8 +2030,8 @@ function renderResult() {
     document.getElementById("lesson").onclick = () => openTopic(app.topicId);
     const pr = document.getElementById("practice");
     if (pr) pr.onclick = () => playTopic(app.topicId, weak);
-    autoSay(`result${app.topicId}`, `${title} ${body}`);
   }
+  autoSay(`result${app.topicId}`, said);
   const again = document.getElementById("again");
   if (again) again.onclick = () => startQuiz(app.topicId);
   document.getElementById("dash").onclick = goDash;
@@ -1878,15 +2039,16 @@ function renderResult() {
 }
 
 function starsHtml(n) {
-  return `<div class="stars" role="img" aria-label="${n} of 3 stars">${[0, 1, 2].map(i => `<span class="${i < n ? "on" : "off"}" style="--i:${i}" aria-hidden="true">${i < n ? "★" : "☆"}</span>`).join("")}</div>`;
+  return `<div class="stars" role="img" aria-label="${n} of 3 stars">${[0, 1, 2].map(i => starSvg(i < n, 56).replace("<svg ", `<svg style="--i:${i}" `)).join("")}</div>`;
 }
 
 function renderPracticeDone() {
   const c = byId(app.topicId);
+  const body = `You got ${app.correct} of ${app.total} on ${c.subSkillNames[app.skill].toLowerCase()}.${look() === "play" ? "" : " Practice does not change your marks."}`;
   screen.innerHTML = `
-    <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">Practice done!</h2><p>You got ${app.correct} of ${app.total} on ${esc(c.subSkillNames[app.skill].toLowerCase())}.${look() === "play" ? "" : " Practice does not change your marks."}</p></div></div>
+    <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">Practice done!</h2><p>${esc(body)}</p>${sayBtn(`Practice done! ${body}`)}</div></div>
     <div class="row actions"><button class="btn primary" type="button" id="quiz">Try the quiz again</button><button class="ghost" type="button" id="dash">${word("map")}</button></div>`;
-  autoSay(`practice${app.topicId}`, `Practice done! You got ${app.correct} of ${app.total}.`);
+  autoSay(`practice${app.topicId}`, `Practice done! ${body}`);
   document.getElementById("quiz").onclick = () => startQuiz(app.topicId);
   document.getElementById("dash").onclick = goDash;
 }
@@ -1948,19 +2110,19 @@ const SCREENS = {
   error: () => { screen.innerHTML = `<div class="narrow">${errorLine()}</div>`; },
   signin: renderSignin, "email-sent": renderEmailSent, consent: renderConsent, notice: renderNotice, "set-pin": renderSetPin, pin: renderPin, "forgot-pin": renderForgotPin,
   profiles: renderProfiles, onboard: renderOnboard, "placement-offer": renderPlacementOffer, placement: renderPlacement,
-  "placement-result": renderPlacementResult, grownups: renderGrownups, "child-settings": renderChildSettings,
+  "placement-done": renderPlacementDone, "placement-result": renderPlacementResult, grownups: renderGrownups, "child-settings": renderChildSettings,
   admin: renderAdmin, fix: renderFix, "child-progress": renderChildProgress, "delete-account": renderDeleteAccount,
   dash: renderDash, lesson: renderLesson, quiz: renderQuiz, result: renderResult, "practice-done": renderPracticeDone,
 };
 
 /* ---------- the two looks ---------- */
 // A child's own screens float on the page in the child's look; grown-up screens use the clean look.
-const KID_SCREENS = ["placement", "dash", "lesson", "quiz", "result", "practice-done"];
+const KID_SCREENS = ["placement", "placement-done", "dash", "lesson", "quiz", "result", "practice-done"];
 const PLAYING = ["dash", "lesson", "quiz", "result", "practice-done"];
 
 function look() {
   if (PLAYING.includes(app.mode) && child) return M.lookFor(child.classId, settings.child?.look);
-  if (app.mode === "placement" && app.draft?.classId) return M.classLook(app.draft.classId);
+  if (["placement", "placement-done"].includes(app.mode) && app.draft?.classId) return M.classLook(app.draft.classId);
   return "focus";
 }
 
@@ -1978,6 +2140,8 @@ function render() {
   const kid = KID_SCREENS.includes(app.mode);
   document.documentElement.dataset.look = look();
   document.documentElement.dataset.screen = kid ? "kid" : "grown";
+  // A quiz or the check is a focused screen: on a phone the top bar steps aside, so the question and answers have the room.
+  document.documentElement.toggleAttribute("data-quiz", ["quiz", "placement"].includes(app.mode));
   screen.classList.toggle("kid", kid);
   (SCREENS[app.mode] || SCREENS.error)();
   renderSide();
@@ -1998,7 +2162,9 @@ function render() {
   } else if (had && !screen.contains(document.activeElement)) {
     // The same screen, rebuilt: keep focus on the control that had it, or on the heading if it's gone.
     const el = screen.querySelector(had);
-    const to = el && !el.disabled ? el : screen.querySelector(".prompt[tabindex], h1, h2");
+    // A button that became disabled (a stepper at its end) hands focus to the next one in its group.
+    const sibling = el?.disabled ? el.closest('[role="group"]')?.querySelector("button:not([disabled])") : null;
+    const to = el && !el.disabled ? el : sibling ?? screen.querySelector(".prompt[tabindex], h1, h2");
     if (to) { if (!to.matches("button, input, select, textarea, a, summary, [tabindex]")) to.setAttribute("tabindex", "-1"); to.focus({ preventScroll: true }); }
   }
 }
@@ -2020,6 +2186,7 @@ function toast(text) {
   if (!t) return;
   t.textContent = text;
   t.hidden = false;
+  if (childVoice()) speak(text);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 2000);
 }
@@ -2035,6 +2202,7 @@ function goBack() {
   if (m === "notice" || m === "forgot-pin") { show(app.back && app.back.mode !== m ? app.back : { mode: "signin" }); return true; }
   if (m === "email-sent") { document.getElementById("back")?.click(); return true; }
   if (m === "onboard") { const b = document.getElementById("obback"); if (b && !b.hidden) { b.click(); return true; } return false; }
+  if (m === "placement-done") { document.getElementById("grown")?.click(); return true; }
   if (m === "placement-offer" || m === "placement-result") { show({ mode: "onboard", step: ONBOARD_STEPS.length - 1, draft: app.draft, editing: null, back: { mode: "profiles" } }); return true; }
   if (m === "grownups") { child ? goDash() : show({ mode: "profiles" }); return true; }
   if (m === "set-pin" && app.cancel) { app.cancel(); return true; }
