@@ -101,9 +101,10 @@ function subSkillAccuracy(s: QuizState): Map<string, number> {
 /**
  * Picks the next question at the current level, never one asked in this quiz.
  * Order of preference at that level: not seen in an earlier attempt, then the
- * one seen longest ago. Only if the level has nothing left does it look at the
- * next harder level, and only then easier ones, so the child never gets an
- * easier question than the level shown.
+ * one seen longest ago; among those, the family's own questions first. Only
+ * if the level has nothing left does it look at the next harder level, and
+ * only then easier ones, so the child never gets an easier question than the
+ * level shown.
  */
 export function nextQuestion(
   s: QuizState,
@@ -141,6 +142,10 @@ export function nextQuestion(
     const oldest = Math.min(...pool.map(q => s.seenBefore.indexOf(q.id)));
     pool = pool.filter(q => s.seenBefore.indexOf(q.id) === oldest);
   }
+
+  // The family's own questions come before Nitya's, so a parent who wrote some sees them asked.
+  const mine = pool.filter(q => q.family);
+  if (mine.length) pool = mine;
 
   const acc = subSkillAccuracy(s);
   const score = (q: Question) => acc.get(q.subSkill) ?? 0.5;

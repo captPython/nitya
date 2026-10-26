@@ -8,6 +8,7 @@ import type { AccountBackend } from "../src/accounts/backend";
 import type { ProfileDetails } from "../src/accounts/options";
 import type { Look } from "../src/looks";
 import { topicInfo } from "../src/supply";
+import { checkUpload, parseTemplate, templateTopic, TEMPLATE_COLUMNS, type UploadRow } from "../src/supply/template";
 import { CLASS_ORDER } from "../src/types";
 import { DEFAULT_BANDS } from "../src/validation";
 
@@ -30,6 +31,20 @@ export interface ContractWorld {
 }
 
 const V = "2026-10-25";
+
+/** Rows of an uploaded template, read and checked as the app does before it sends them. */
+const TOPICS = ALL_CONTENT.map(templateTopic);
+const ADDING = "ukg-addition-10";
+const row = (question: string, choices: string[], answer: string, sum = "", topic = "Adding with objects up to 10") =>
+  ["UKG", topic, "1 Easy", question, ...choices, ...Array(4 - choices.length).fill(""), answer, "Count on from the first number.", `So the answer is ${answer}.`, "", "", "", sum];
+function upload(...lines: string[][]): UploadRow[] {
+  const sheet = [{ row: 1, cells: TEMPLATE_COLUMNS.map(c => c.header) }, ...lines.map((cells, i) => ({ row: i + 2, cells }))];
+  return checkUpload(parseTemplate(sheet, { fileName: "mine.xlsx", topics: TOPICS }), TOPICS).rows;
+}
+const GOOD = row("Mia has 2 apples and gets 3 more. How many apples now?", ["4", "5", "6"], "5", "2 + 3");
+const NO_SUM = row("Ravi has 4 kites and gets 1 more. How many kites now?", ["4", "5", "6"], "5");
+const WRONG_SUM = row("Asha has 3 pens and gets 3 more. How many pens now?", ["5", "6", "7"], "7", "3 + 3");
+const promptOf = (line: string[]) => line[3];
 const sampleIds = (ids: string[]) => ids.filter(id => id.startsWith("demo-")).sort();
 
 /**
@@ -113,7 +128,7 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       await b.giveConsent(V);
       await b.setPinHash(HASH);
       const riya = await b.createProfile(RIYA);
-      await b.saveChildSettings(riya.id, { passPercent: 80, wrongPenalty: null, look: null, voice: null });
+      await b.saveChildSettings(riya.id, { passPercent: 80, wrongPenalty: null, look: null, voice: null, community: null });
       const other = await w.family();
       await other.giveConsent(V);
       const kabir = await other.createProfile(KABIR);
@@ -160,7 +175,7 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       await b.giveConsent(V);
       const riya = await b.createProfile(RIYA);
       const kabir = await b.createProfile(KABIR);
-      const none = { passPercent: null, wrongPenalty: null, look: null, voice: null };
+      const none = { passPercent: null, wrongPenalty: null, look: null, voice: null, community: null };
       const choose = (c: Partial<ChildSettings>): ChildSettings => ({ ...none, ...c });
       expect(await b.childSettings(riya.id)).toEqual(none);
       await b.saveChildSettings(riya.id, choose({ passPercent: 80, wrongPenalty: 2 }));
@@ -190,7 +205,7 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       await b.giveConsent(V);
       const riya = await b.createProfile(RIYA);
       const kabir = await b.createProfile(KABIR);
-      const quiz = { passPercent: 75, wrongPenalty: null, voice: null };
+      const quiz = { passPercent: 75, wrongPenalty: null, voice: null, community: null };
       await b.saveChildSettings(riya.id, { ...quiz, look: "focus" });
       expect(await b.childSettings(riya.id)).toEqual({ ...quiz, look: "focus" });
       expect((await b.childSettings(kabir.id)).look).toBeNull();
@@ -272,6 +287,156 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       ]);
     });
 
+  });
+
+  describe(`${name}: a family's own questions and the community bank`, () => {
+    const fromUpload = (q: object) => (q as { source?: string }).source === "upload";
+    const served = async (b: AccountBackend, community = false) => (await b.questions(ADDING, { community })).filter(fromUpload);
+
+    it("gives a family's passing questions to their own children at once, first, and keeps the rest for their review", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await expect(b.saveUpload({ fileName: "mine.xlsx", private: false, rows: upload(GOOD) })).rejects.toThrow(/consent/i);
+      await b.giveConsent(V);
+      const official = (await b.questions(ADDING))[0];
+      const copy = row(official.prompt, official.options!, official.answers[0]);
+      const r = await b.saveUpload({ fileName: "mine.xlsx", private: false, rows: upload(GOOD, NO_SUM, WRONG_SUM, GOOD, ...(official.visual ? [] : [copy])) });
+      expect(r).toMatchObject({ ready: 2, inReview: 1, shared: 1, alreadyAdded: 1, inNitya: official.visual ? 0 : 1, refused: 0 });
+      expect(r.uploadId).toBeTruthy();
+
+      const mine = await served(b);
+      expect(mine.map(q => q.prompt).sort()).toEqual([promptOf(GOOD), promptOf(NO_SUM)].sort());
+      expect(mine.every(q => q.family)).toBe(true);
+      expect((await b.questions(ADDING)).filter(q => !q.family).some(fromUpload)).toBe(false);
+
+      const own = await b.ownQuestions();
+      expect(own.map(q => [q.question.prompt, q.status, q.shared])).toEqual([
+        [promptOf(GOOD), "ready", true], [promptOf(NO_SUM), "ready", false], [promptOf(WRONG_SUM), "review", false],
+      ]);
+      expect(own[2].problems[0]).toBe('The right answer says 7, but the sum "3 + 3" gives 6.');
+      expect(await b.questionUploads()).toEqual([expect.objectContaining({ id: r.uploadId, fileName: "mine.xlsx", private: false, ready: 2, inReview: 1, shared: 1 })]);
+
+      // Another family gets none of it, until a child of theirs has the community bank on; then only the shared one.
+      const other = await w.family();
+      await other.giveConsent(V);
+      expect(await served(other)).toEqual([]);
+      expect((await served(other, true)).map(q => q.prompt)).toEqual([promptOf(GOOD)]);
+      expect((await served(other, true))[0].family).toBeFalsy();
+      expect(await other.ownQuestions()).toEqual([]);
+      // The family's review isn't the admin's.
+      const admin = await w.admin();
+      expect((await admin.reviewQueue()).some(e => e.question.source === "upload")).toBe(false);
+    });
+
+    it("checks every question again where the family can't change the outcome", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const [good, wrong] = upload(GOOD, WRONG_SUM);
+      // The app's own verdicts claim both are fine; the answer of one is changed after its check.
+      const tampered = { ...wrong, status: "ready" as const, problems: [], passedAll: true };
+      const linked = { ...good, question: { ...good.question, prompt: "See www.example.com. How many apples now?" } };
+      const r = await b.saveUpload({ fileName: "mine.xlsx", private: false, rows: [tampered, linked, { row: 9, question: { prompt: "?" } } as unknown as UploadRow] });
+      expect(r).toMatchObject({ ready: 0, inReview: 1, shared: 0, refused: 2 });
+      expect((await b.ownQuestions())[0]).toMatchObject({ status: "review", shared: false });
+    });
+
+    it("lets the family approve, fix or delete a question under review", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const other = await w.family();
+      await other.giveConsent(V);
+      const sixes = row("Om has 3 cars and gets 3 more. How many cars now?", ["5", "6", "7"], "7", "3 + 3");
+      await b.saveUpload({ fileName: "mine.xlsx", private: false, rows: upload(WRONG_SUM, sixes) });
+      const [first, second] = await b.ownQuestions();
+      await expect(other.reviewOwnQuestion(first.question.id, { decision: "approve" })).rejects.toThrow("isn't in this account");
+
+      // Approved as it is: for the family's own children, never shared.
+      expect(await b.reviewOwnQuestion(first.question.id, { decision: "approve" })).toBeNull();
+      expect((await b.ownQuestions())[0]).toMatchObject({ status: "ready", shared: false });
+      expect((await served(b)).map(q => q.prompt)).toEqual([promptOf(WRONG_SUM)]);
+      await expect(b.reviewOwnQuestion(first.question.id, { decision: "approve" })).rejects.toThrow("already reviewed");
+
+      // Fixed: checked again, and shared once it passes everything.
+      const fixed = { ...second.question, answers: ["6"], explanation: "3 and 3 more makes 6.", reason: "3 and 3 more makes 6." };
+      const verdict = await b.reviewOwnQuestion(second.question.id, { decision: "fix", question: fixed });
+      expect(verdict).toMatchObject({ status: "ready", passedAll: true, problems: [] });
+      expect((await b.ownQuestions())[1]).toMatchObject({ status: "ready", shared: true });
+      expect((await served(other, true)).map(q => q.answers)).toEqual([["6"]]);
+
+      await b.reviewOwnQuestion(second.question.id, { decision: "delete" });
+      expect((await b.ownQuestions()).map(q => q.question.id)).toEqual([first.question.id]);
+      expect(await served(other, true)).toEqual([]);
+    });
+
+    it("keeps a private upload out of the community bank, and takes an upload away", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const other = await w.family();
+      await other.giveConsent(V);
+      const r = await b.saveUpload({ fileName: "ours.csv", private: true, rows: upload(GOOD) });
+      expect(r).toMatchObject({ ready: 1, shared: 0 });
+      expect(await served(other, true)).toEqual([]);
+      expect((await served(b)).length).toBe(1);
+      // The same file again adds nothing.
+      expect(await b.saveUpload({ fileName: "ours.csv", private: true, rows: upload(GOOD) })).toMatchObject({ uploadId: null, alreadyAdded: 1 });
+      await expect(other.removeUpload(r.uploadId!)).rejects.toThrow("isn't in this account");
+      await b.removeUpload(r.uploadId!);
+      expect(await served(b)).toEqual([]);
+      expect(await b.questionUploads()).toEqual([]);
+      expect(await b.ownQuestions()).toEqual([]);
+    });
+
+    it("hides a reported community question until an admin keeps it, or takes it out of the community bank", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const other = await w.family();
+      await other.giveConsent(V);
+      const admin = await w.admin();
+      await b.saveUpload({ fileName: "mine.xlsx", private: false, rows: upload(GOOD) });
+      const [shared] = await served(other, true);
+      await expect(b.reportQuestion(shared.id, "Mine")).rejects.toThrow("isn't in the community bank");
+      await expect(other.reportQuestion(shared.id, " ")).rejects.toThrow("a few words");
+      await other.reportQuestion(shared.id, "The apples are too hard for my child");
+      expect(await served(other, true)).toEqual([]);
+      expect((await served(b)).length).toBe(1);
+      await expect(other.communityReports()).rejects.toThrow(/only an admin/i);
+      expect(await admin.communityReports()).toEqual([expect.objectContaining({
+        question: expect.objectContaining({ id: shared.id }), reasons: ["The apples are too hard for my child"],
+      })]);
+
+      await admin.moderateQuestion(shared.id, "keep");
+      expect((await served(other, true)).length).toBe(1);
+      expect(await admin.communityReports()).toEqual([]);
+
+      await other.reportQuestion(shared.id, "Still wrong");
+      await admin.moderateQuestion(shared.id, "remove");
+      expect(await served(other, true)).toEqual([]);
+      expect((await served(b)).length).toBe(1);
+      expect((await b.ownQuestions())[0].shared).toBe(false);
+      await expect(admin.moderateQuestion(shared.id, "keep")).rejects.toThrow("isn't in the community bank");
+    });
+
+    it("keeps the community bank switch for each child, off until a parent turns it on", async () => {
+      const w = await newWorld();
+      const b = await w.family();
+      await b.giveConsent(V);
+      const riya = await b.createProfile(RIYA);
+      const kabir = await b.createProfile(KABIR);
+      expect((await b.childSettings(riya.id)).community).toBeNull();
+      const now = await b.childSettings(riya.id);
+      await b.saveChildSettings(riya.id, { ...now, community: true });
+      expect((await b.childSettings(riya.id)).community).toBe(true);
+      expect((await b.childSettings(kabir.id)).community).toBeNull();
+      await b.saveChildSettings(riya.id, { ...now, community: null });
+      expect((await b.childSettings(riya.id)).community).toBeNull();
+    });
+  });
+
+  describe(`${name}: New questions`, () => {
     it("makes new questions when asked, for the asking family's own child, and logs it for the admin", async () => {
       const w = await newWorld();
       const b = await w.family();

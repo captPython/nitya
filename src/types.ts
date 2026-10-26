@@ -87,6 +87,8 @@ export interface Question {
   working?: Working;
   /** Questions with the same maths (like "3 + 4" and "4 + 3") share a group and never meet in one quiz. */
   variantGroup?: string;
+  /** Uploaded by the child's own family. A quiz asks these before Nitya's own questions at the same level. */
+  family?: boolean;
 }
 
 export interface Topic {

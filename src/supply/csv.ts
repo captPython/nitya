@@ -1,6 +1,7 @@
 import { contentKey, shortHash, variantGroup } from "../content/gen";
 import { QUESTION_FORMATS, type DotGroup, type Expr, type Level, type QuestionFormat, type Visual, type Working } from "../types";
 import type { SuppliedQuestion, TopicInfo } from "./types";
+import type { SheetRow } from "./xlsx";
 
 /**
  * The columns of a question CSV, in the order the template uses. Options and
@@ -18,8 +19,18 @@ export interface CsvRowError {
   message: string;
 }
 
-/** Splits CSV text into rows of cells, following RFC 4180 quoting. */
+/** Splits CSV text into rows of cells, following RFC 4180 quoting, and leaves out empty rows. */
 export function parseCsv(text: string): string[][] {
+  return records(text).filter(r => r.some(c => c.trim() !== ""));
+}
+
+/** The rows that have any text, each with its row number as a spreadsheet shows it. */
+export function parseCsvRows(text: string): SheetRow[] {
+  return records(text).map((cells, i) => ({ row: i + 1, cells })).filter(r => r.cells.some(c => c.trim() !== ""));
+}
+
+/** Every record, empty ones included, so row numbers match the spreadsheet's. */
+function records(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [], cell = "", quoted = false;
   const src = text.replace(/^﻿/, "");
@@ -38,7 +49,7 @@ export function parseCsv(text: string): string[][] {
   }
   if (quoted) throw new Error("The file ends inside a quoted cell.");
   if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
-  return rows.filter(r => r.some(c => c.trim() !== ""));
+  return rows;
 }
 
 /**

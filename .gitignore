@@ -1,3 +1,4 @@
 node_modules
 dist
 supabase/functions/new-questions/server.js
+supabase/functions/family-questions/server.js

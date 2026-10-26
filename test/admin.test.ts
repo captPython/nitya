@@ -38,7 +38,7 @@ describe("class settings", () => {
 
   it("keep any choice inside what a quiz allows: 1% to 100%, and 0 to 4 marks off", () => {
     expect(QUIZ_LIMITS).toEqual({ passPercent: { min: 1, max: 100 }, wrongPenalty: { min: 0, max: 4 } });
-    const child = (c: Partial<ChildSettings>): ChildSettings => ({ ...none, look: null, voice: null, ...c });
+    const child = (c: Partial<ChildSettings>): ChildSettings => ({ ...none, look: null, voice: null, community: null, ...c });
     for (const ok of [child({}), child({ passPercent: 1, wrongPenalty: 0 }), child({ passPercent: 100, wrongPenalty: 4 })]) expect(childSettingsProblem(ok)).toBeNull();
     expect(childSettingsProblem(child({ passPercent: 0 }))).toBe("The pass mark can be 1% to 100%.");
     expect(childSettingsProblem(child({ passPercent: 101 }))).toBe("The pass mark can be 1% to 100%.");

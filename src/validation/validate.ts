@@ -184,15 +184,20 @@ function checkWording(q: Question, ctx: ValidationContext): CheckResult {
   if (scope && words > scope.maxPromptWords) {
     problems.push(`The question is ${words} words long; ${ctx.classId} questions should be ${scope.maxPromptWords} or fewer.`);
   }
-  const texts = [q.prompt, q.hint, q.explanation, q.reason, ...(q.options ?? [])];
   for (const field of ["hint", "explanation", "reason"] as const) {
     if (!q[field].trim()) problems.push(`The ${field} is empty.`);
   }
-  const all = texts.join(" ");
+  return result([...problems, ...safetyProblems(q)]);
+}
+
+/** Words a child must never see, and links. Part of the wording check; uploads are refused on these alone. */
+export function safetyProblems(q: Question): string[] {
+  const problems: string[] = [];
+  const all = [q.prompt, q.hint, q.explanation, q.reason, ...(q.options ?? [])].join(" ");
   const unsafe = UNSAFE_WORDS.filter(w => new RegExp(`\\b${w}\\b`, "i").test(all));
   if (unsafe.length) problems.push(`It uses ${listOf(unsafe.map(w => `"${w}"`))}, which ${unsafe.length === 1 ? "is" : "are"} not right for a child.`);
   if (/https?:\/\/|www\.|\.com\b/i.test(all)) problems.push("It contains a link, and children must never see links.");
-  return result(problems);
+  return problems;
 }
 
 /** Runs every check on one question. A question that fails any check goes to the admin's review queue. */
