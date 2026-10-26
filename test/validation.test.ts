@@ -64,6 +64,16 @@ describe("planted faulty questions", () => {
     const r = check(good({ answers: ["8"] }));
     expect(failed(r)).toEqual(["answer"]);
     expect(r.answer.problems).toContain("Recomputing gives a different answer: 8 is wrong.");
+    // The admin queue marks only this stored answer as wrong.
+    expect(r.answer.wrongKeys).toEqual(["8"]);
+    expect(check(good()).answer.wrongKeys).toBeUndefined();
+  });
+
+  it("says an answer it can't recompute is unchecked, not wrong", () => {
+    const r = check(good({ working: undefined }));
+    expect(r.answer.passed).toBe(false);
+    expect(r.answer.unchecked).toBe(true);
+    expect(r.answer.wrongKeys).toBeUndefined();
   });
 
   it("catches duplicate options", () => {

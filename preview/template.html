@@ -23,7 +23,7 @@
   --leaf: #15803d; --leaf-node: #1e9e5a; --leaf-deep: #146c3e; --leaf-soft: #e2f5eb;
   --coral: #b8432a; --coral-line: #e85a36; --coral-soft: #fff1ea;
   --line: #b8d6f2; --line-soft: #d6e6f7; --track: #e3ecf8; --shadow: #b8d6f2;
-  --dot-blue: #2f6fe4; --dot-orange: #d9661a; --star: #f5a524; --star-line: #9a4507; --star-off: #6b7c9f;
+  --dot-blue: #2f6fe4; --dot-orange: #c2410c; --star: #f5a524; --star-line: #9a4507; --star-off: #6b7c9f;
   --cta: #15803d; --cta-ink: #ffffff; --cta-deep: #0f5f2d; --ring: #2f6fe4;
   --leaf-text: #146c3e; --hint-bg: #fff3c4; --hint-ink: #8a5a00;
   --owl: #ffc83d; --owl-dark: #d9a21f; --owl-belly: #fff1c4;
@@ -43,7 +43,7 @@
   --leaf: #15803d; --leaf-node: #15803d; --leaf-deep: #15803d; --leaf-soft: #e7f6ec;
   --coral: #b42318; --coral-line: #d92d20; --coral-soft: #fef0ec;
   --line: #d6dae6; --line-soft: #e5e7ef; --track: #e2e8f0; --shadow: transparent;
-  --dot-blue: #4338ca; --dot-orange: #d97706; --star: #b45309; --star-line: #b45309; --star-off: #7b8798;
+  --dot-blue: #4338ca; --dot-orange: #b45309; --star: #b45309; --star-line: #b45309; --star-off: #7b8798;
   --cta: #4338ca; --cta-ink: #ffffff; --cta-deep: #3730a3; --ring: #4338ca;
   --leaf-text: #166534; --hint-bg: #fef3c7; --hint-ink: #b45309;
   --font-display: "Lexend", system-ui, sans-serif;
@@ -165,7 +165,7 @@ b, strong { font-weight: var(--body-strong); }
   .ghost.quiet:hover, .addkid:hover { background: var(--blue-soft); }
   .ghost.danger:hover { background: var(--coral-soft); }
 }
-:where(.btn, .ghost, .chipbtn, .linkbtn, .say, .tapdot, .gbtn, .tabs button):focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
+:where(.btn, .ghost, .chipbtn, .linkbtn, .say, .tapdot, .starrow, .gbtn, .tabs button):focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
 [tabindex="-1"]:focus { outline: none; }
 
 /* Answer options: big tiles in the playful look, full-width rows with A/B/C keys in the clean one */
@@ -176,7 +176,8 @@ b, strong { font-weight: var(--body-strong); }
 .opts .btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 112px; font-size: 3rem; line-height: 1; }
 .opts .btn.long { font-size: 1.5rem; line-height: 1.15; }
 .key { display: none; }
-.opt-note { font-family: var(--font-body); font-size: 0.85rem; font-weight: var(--body-strong); line-height: 1.1; }
+.opt-note { font-family: var(--font-body); font-size: 0.85rem; font-weight: var(--body-strong); line-height: 1.1; white-space: nowrap; }
+@media (max-width: 400px) { .opt-note { font-size: 0.8rem; } }
 .opt-note.ok { color: var(--leaf-text); }
 .btn.right { box-shadow: 0 0 0 2px var(--leaf); }
 .keyhint { display: none; }
@@ -246,7 +247,8 @@ b, strong { font-weight: var(--body-strong); }
 .goalflag { position: absolute; right: -30px; top: 50%; transform: translateY(-62%); color: var(--ink); line-height: 0; }
 .goalflag svg { width: 30px; height: 30px; }
 .goalflag.crossed { color: var(--leaf); }
-.goalflag.burst::after { content: "★ ★ ★"; position: absolute; left: 50%; top: 0; transform: translateX(-50%); white-space: nowrap; color: var(--star); -webkit-text-stroke: 1px var(--star-line); font-size: 1rem; letter-spacing: .1em; animation: burst .9s ease-out both; pointer-events: none; line-height: 1; }
+/* Reaching the flag earns one star: it pops up out of the flag */
+.burststar { position: absolute; left: 50%; top: 0; transform: translateX(-50%); animation: burst .9s ease-out both; pointer-events: none; line-height: 0; }
 @keyframes burst { from { opacity: 0; transform: translate(-50%, 6px) scale(.4); } 40% { opacity: 1; transform: translate(-50%, -18px) scale(1.2); } to { opacity: 0; transform: translate(-50%, -30px) scale(1); } }
 .qdots { display: flex; gap: 4px; justify-content: space-between; }
 .qdots span { flex: 1; max-width: 12px; height: 10px; border-radius: 999px; background: var(--track); }
@@ -254,13 +256,14 @@ b, strong { font-weight: var(--body-strong); }
 /* The question showing is a ring, and stays one until Next */
 .qdots .now { background: var(--card); box-shadow: inset 0 0 0 2.5px var(--ink); }
 /* After the flag: the flag kept, the star it earned, and the next two stars filling */
-.marks.meter.goal.starsphase { padding-right: 16px; }
-.starrow { display: flex; align-items: center; gap: 10px; }
+.marks.meter.goal.starsphase { padding: 10px 16px 8px; }
+.starrow { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.starrow .nodesay { position: static; margin-left: 4px; box-shadow: none; }
 .flagdone { color: var(--leaf); line-height: 0; margin-right: 2px; }
 .flagdone svg { width: 30px; height: 30px; }
-.starslot { position: relative; width: 36px; height: 36px; line-height: 0; }
+.starslot { position: relative; width: 32px; height: 32px; line-height: 0; }
 .starfill { position: absolute; inset: 0 auto 0 0; overflow: hidden; transition: width .6s ease-out; }
-.starfill svg { width: 36px; height: 36px; max-width: none; }
+.starfill svg { width: 32px; height: 32px; max-width: none; }
 /* On a phone the clean marks card is one line, a thin bar and the "How marks work" link, so the answers stay in view. */
 @media (max-width: 520px) {
   [data-look="focus"] .marks { padding: 10px 14px 6px; gap: 4px; }
@@ -459,9 +462,13 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 
 /* New questions, settings and the admin panel */
 .act { display: grid; gap: 4px; justify-items: end; }
+/* Two buttons on a stop ("Practise first" and "Try again") sit side by side at one width when there's room */
+@media (min-width: 521px) { .topic .act:has(> .chipbtn + .chipbtn) { grid-auto-flow: column; gap: 8px; } .topic .act:has(> .chipbtn + .chipbtn) .chipbtn { min-width: 160px; } }
 .linkbtn { font: inherit; font-size: 0.88rem; font-weight: var(--body-strong); min-height: 44px; padding: 0 6px; border: 0; background: none; color: var(--blue); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .linkbtn[disabled] { color: var(--muted); cursor: default; }
 .linkbtn:focus-visible { border-radius: 6px; }
+/* A link inside a sentence keeps a 44px tap area without opening a gap in the lines around it */
+p > .linkbtn { min-height: 0; padding-block: 12px; margin-block: -12px; vertical-align: baseline; }
 .settings { display: grid; gap: 12px; }
 .setting { border: var(--bw-ghost) solid var(--line); border-radius: 18px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
 .setline { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -485,6 +492,7 @@ pre.data { max-height: 240px; overflow: auto; background: var(--sky); border-rad
 /* The stored answer is the question's key, neutral until a check disagrees with it */
 .optlist span.anskey { border-color: var(--ink); }
 .optlist span.anskey.bad { border-color: var(--coral-line); background: var(--coral-soft); color: var(--coral); }
+.optlist span.anskey.unchecked, .optlist span.repeat { border-color: var(--hint-ink); background: var(--hint-bg); color: var(--hint-ink); }
 .problems { margin: 0; padding: 10px 14px 10px 32px; border-radius: 14px; background: var(--coral-soft); display: grid; gap: 4px; font-size: 0.95rem; }
 .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .nums label { display: grid; gap: 4px; font-size: 0.85rem; }
@@ -552,7 +560,18 @@ input[type="number"], select {
 
 /* Lesson dots a child can tap to count */
 .tapdots { flex-direction: column; align-items: center; gap: 14px; }
-.dotgroup { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+/* A short last row starts at the left, as in a ten-frame, so no dot sits alone in the middle */
+.dotgroup { display: grid; grid-template-columns: repeat(var(--cols, 5), 46px); gap: 8px; }
+/* Groups are set apart by a line: under each other in the lesson, side by side in a quiz */
+.tapdots:not(.compact) .dotgroup + .dotgroup { border-top: 2px solid var(--line); padding-top: 14px; }
+.dotgroup.frame { padding: 8px; border: 2px solid var(--ink); border-radius: 12px; }
+.tapdots:not(.compact) .dotgroup.frame + .dotgroup.frame { border-top: 2px solid var(--ink); padding-top: 8px; }
+/* A group counted on its own shows its total under it; the space is kept, so nothing moves when it appears */
+.grouptotal { grid-column: 1 / -1; min-height: 28px; text-align: center; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.25rem; line-height: 28px; color: var(--ink); }
+.dotbox { display: grid; justify-items: center; gap: 2px; }
+.kid .visual.tapdots.compact { padding: 10px 12px; }
+.dotbox .recount { min-height: 44px; }
+.dotbox .recount[data-idle] { visibility: hidden; }
 .tapdot { width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.2rem; color: #ffffff; }
 .tapdot.blue { background: var(--dot-blue); }
 .tapdot.orange { background: var(--dot-orange); }
@@ -562,12 +581,14 @@ input[type="number"], select {
 .tapdot.crossed::before, .tapdot.crossed::after { content: ""; position: absolute; left: 16%; right: 16%; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: var(--ink); transform: rotate(45deg); }
 .tapdot.crossed::after { transform: rotate(-45deg); }
 /* In a quiz: rows of 5, groups side by side when they fit, so the answers stay in view */
-.tapdots.compact { flex-direction: row; flex-wrap: nowrap; justify-content: center; gap: 10px 24px; }
+.tapdots.compact { flex-direction: row; flex-wrap: nowrap; justify-content: center; gap: 10px 12px; }
+.tapdots.compact .dotgroup + .dotgroup { border-left: 2px solid var(--line); padding-left: 12px; }
 .tapdots.compact .dotgroup { display: grid; grid-template-columns: repeat(var(--cols, 5), 40px); gap: 6px; }
 .tapdots.compact .tapdot { width: 40px; height: 40px; font-size: 1.05rem; }
 /* A hint's amount, drawn as dots in rows of 5 */
-.hintdots { display: grid; grid-template-columns: repeat(var(--cols, 5), 24px); gap: 6px; margin: 8px 0; }
-.hintdots i { width: 24px; height: 24px; border-radius: 50%; background: var(--dot-blue); }
+/* Hollow rings in a frame, so they read as a picture and not as dots to tap */
+.hintdots { display: grid; width: max-content; grid-template-columns: repeat(var(--cols, 5), 24px); gap: 6px; margin: 8px 0; padding: 6px; border: 2px solid var(--hint-ink); border-radius: 10px; }
+.hintdots i { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--dot-blue); box-sizing: border-box; }
 .tapdot.counted { box-shadow: 0 0 0 4px var(--sun); }
 [data-mode="dark"] .tapdot { color: #0e1a2f; }
 .btn.ready { animation: pulse 1s ease-in-out 2; }
@@ -594,7 +615,7 @@ input[type="number"], select {
 .rowbtn:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
 @media (hover: hover) and (pointer: fine) { .rowbtn:hover { box-shadow: 0 0 0 2px var(--blue-mid); } }
 .btn.iconlabel { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
-.btn.primary small { display: block; font-family: var(--font-body); font-size: 0.85rem; font-weight: 500; opacity: .9; }
+.btn.primary small { display: block; font-family: var(--font-body); font-size: 0.85rem; font-weight: 500; }
 
 /* Sign-in with Google, in Google's own button style */
 .gbtn { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 52px; border-radius: 999px; border: 1px solid #747775; background: #ffffff; color: #1f1f1f; font: 500 1.05rem "Roboto", "Lexend", system-ui, sans-serif; cursor: pointer; }
@@ -637,6 +658,7 @@ label.inline { font-weight: 400; }
 
 /* Progress page and the privacy notice */
 .prow { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.pmeta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .qlog { margin: 0; padding: 0; list-style: none; display: grid; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
 .qlog li { padding: 8px 0; border-top: 1px solid var(--line-soft); }
 .disc summary { cursor: pointer; color: var(--blue); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
@@ -652,8 +674,9 @@ label.inline { font-weight: 400; }
 .answerpick { border: 0; margin: 0; padding: 0; min-width: 0; }
 .answerpick legend { padding: 0; margin-bottom: 6px; font-weight: var(--body-strong); }
 .pick { display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 14px; border: 2px solid var(--line); border-radius: 12px; font-weight: 600; cursor: pointer; }
-.pick input { width: 22px; height: 22px; accent-color: var(--leaf); }
-.pick:has(input:checked) { border-color: var(--leaf); background: var(--leaf-soft); }
+.pick input { width: 22px; height: 22px; accent-color: var(--blue); }
+/* The ticked answer is the admin's choice, not a verified one, so it is neutral, not green */
+.pick:has(input:checked) { border-color: var(--blue); background: var(--blue-soft); }
 .sticky-save { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; background: var(--card); border-top: 1px solid var(--line-soft); }
 /* Phones: the playful owl is a little smaller and its speaker sits under it, so the question gets the bubble's full
    width; a long word problem is a size smaller. Both keep the answers above a 640px fold. */
@@ -677,7 +700,7 @@ label.inline { font-weight: 400; }
 @media (prefers-reduced-motion: reduce) {
   .btn, .fill, .chipbtn, .starfill { transition: none; } .btn:hover, .btn:active, .chipbtn:active { transform: none; }
   .stars .on, .btn.ready, .card.enter, .btn.right, .btn.tried { animation: none; }
-  .goalflag.burst::after { animation: none; opacity: 0; }
+  .burststar { animation: none; opacity: 0; }
 }
 </style>
 </head>

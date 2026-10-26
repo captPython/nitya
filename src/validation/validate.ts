@@ -12,6 +12,10 @@ export interface CheckResult {
   passed: boolean;
   /** Plain sentences for the admin's review queue. Empty when the check passed. */
   problems: string[];
+  /** The answer check only: the stored answers that recomputing shows are wrong. */
+  wrongKeys?: string[];
+  /** The answer check only: the answer couldn't be recomputed, so it is unchecked rather than wrong. */
+  unchecked?: boolean;
 }
 
 /** One run of every check on one question. Stored as question_checks.report. */
@@ -64,7 +68,7 @@ function shapeOf(option: string): string {
 }
 
 function checkAnswer(q: Question, follow: Interpretation | null, workingProblem: string | null): CheckResult {
-  if (!follow) return result([workingProblem ?? "The question has no working, so its answer can't be recomputed. Check it by hand."]);
+  if (!follow) return { ...result([workingProblem ?? "The question has no working, so its answer can't be recomputed. Check it by hand."]), unchecked: true };
   const problems: string[] = [];
 
   const shown = new Set([...numbersIn(q.prompt), ...(q.options ?? []).flatMap(numbersIn), ...visualNumbers(q)]);
@@ -91,7 +95,7 @@ function checkAnswer(q: Question, follow: Interpretation | null, workingProblem:
 
   const told = normalise(`${q.explanation} ${q.reason}`);
   if (!q.answers.some(a => mentions(told, normalise(a)))) problems.push("The explanation and reason never state the answer.");
-  return result(problems);
+  return { ...result(problems), ...(wrongAnswers.length ? { wrongKeys: wrongAnswers } : {}) };
 }
 
 function checkOptions(q: Question, follow: Interpretation | null): CheckResult {

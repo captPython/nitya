@@ -28,6 +28,13 @@ export interface DotGroup {
 export interface Visual {
   kind: "dots";
   groups: DotGroup[];
+  /**
+   * How a child taps to count: "all" (the default) runs one count across every group, as in adding; "each" starts
+   * again at 1 in each group, as in comparing.
+   */
+  count?: "all" | "each";
+  /** Draw each group as a ten-frame: rows of 5 in a box, so 10 reads as one full frame. */
+  frames?: boolean;
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { Level, TopicContent } from "../../types";
-import { buildBank, dots, int, pick, shuffle, type Template } from "../gen";
+import { buildBank, eachDots, int, pick, shuffle, type Template } from "../gen";
 
 const ID = "ukg-comparing";
 
@@ -14,7 +14,7 @@ const moreGroups = (maxN: number, minGap: number, allowSame: boolean): Template 
   return {
     subSkill: "compare-groups", format: "tap-picture",
     prompt: allowSame ? `Which has ${word} dots: blue, orange, or are they the same?` : `Which has ${word} dots, blue or orange?`,
-    visual: dots({ count: a, color: "blue" }, { count: b, color: "orange" }),
+    visual: eachDots({ count: a, color: "blue" }, { count: b, color: "orange" }),
     options: allowSame ? ["Blue", "Orange", "Same"] : ["Blue", "Orange"],
     answers: [answer],
     hint: "Count each colour, then compare the two numbers.",
@@ -118,7 +118,7 @@ const TEMPLATES: Record<Level, Template[]> = {
 export const COMPARING: TopicContent = {
   topic: { id: ID, classId: "UKG", order: 3, title: "Comparing numbers" },
   lesson: [
-    { title: "More and fewer", text: "Count each group. The bigger number has more.", visual: dots({ count: 6, color: "blue" }, { count: 3, color: "orange" }) },
+    { title: "More and fewer", text: "Count each group. The bigger number has more.", visual: eachDots({ count: 6, color: "blue" }, { count: 3, color: "orange" }) },
     { title: "In real life", text: "Line up grapes in pairs. Grapes left over? That side has more." },
     { title: "Bigger numbers come later", text: "15 comes after 12 when you count. So 15 is bigger." },
     { title: "Tens first", text: "27 or 32? Check the tens. 3 tens is more, so 32 is bigger." },

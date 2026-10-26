@@ -39,6 +39,8 @@ export function numOptions(r: Rng, answer: number, lo: number, hi: number, sprea
 }
 
 export const dots = (...groups: Visual["groups"]): Visual => ({ kind: "dots", groups });
+/** Groups to compare: a child counts each one on its own. */
+export const eachDots = (...groups: Visual["groups"]): Visual => ({ kind: "dots", groups, count: "each" });
 
 /** Working helpers: add(3, 4) is 3 + 4, sub(9, 2, 3) is 9 − 2 − 3. */
 export const add = (...args: Expr[]): Expr => ({ op: "+", args });

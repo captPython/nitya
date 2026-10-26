@@ -64,6 +64,8 @@ describe("reading CSV", () => {
   it("reads pictures and sums the way an admin writes them", () => {
     expect(parsePicture("3 blue, 2 orange")).toEqual({ kind: "dots", groups: [{ count: 3, color: "blue" }, { count: 2, color: "orange" }] });
     expect(parsePicture("5 Blue 2 crossed")).toEqual({ kind: "dots", groups: [{ count: 5, color: "blue", crossed: 2 }] });
+    expect(parsePicture("4 blue, 6 orange, count each")).toEqual({ kind: "dots", groups: [{ count: 4, color: "blue" }, { count: 6, color: "orange" }], count: "each" });
+    expect(parsePicture("10 orange, 3 orange, frames")).toEqual({ kind: "dots", groups: [{ count: 10, color: "orange" }, { count: 3, color: "orange" }], frames: true });
     expect(() => parsePicture("3 red")).toThrow('Can\'t read the picture "3 red"');
     expect(() => parsePicture("2 blue 3 crossed")).toThrow("crosses out more dots than it has");
     expect(parseWorking("9 − 2 − 3")).toEqual(arith({ op: "-", args: [9, 2, 3] }));

@@ -187,6 +187,24 @@ describe("a child's progress", () => {
     expect(summarize("UKG", topics, data("cleared")).recentSkills[key]).toEqual({ right: 3, total: 3 });
   });
 
+  it("judges a skill on its practice round alone when that was the last play to ask it", () => {
+    const play = (id: string, hour: number, practice: boolean, right: boolean[]) => ({
+      attempt: { id, topicId: c1.topicId, attemptNo: hour, practice, startedAt: `2026-10-25T1${hour}:00:00Z`, finishedAt: "x", marks: 0, cleared: false, stars: 0 },
+      responses: right.map((ok, i) => ({ attemptId: id, seq: i + 1, questionId: c1.id, level: 1 as const, subSkill: c1.subSkill, firstTryCorrect: ok, retryCorrect: null, marksDelta: 0 })),
+    });
+    const key = `${c1.topicId}|${c1.subSkill}`;
+    const of = (...ps: ReturnType<typeof play>[]): ProfileData => ({
+      attempts: ps.map(p => p.attempt), responses: ps.flatMap(p => p.responses),
+      topics: [{ topicId: c1.topicId, state: "current", attempts: 2, bestMarks: 0 }],
+    });
+    const failed = play("a", 1, false, [false, false, false, false]);
+    // A failed quiz and then 8 of 8 in practice: the practice round alone, so the skill is no longer weak.
+    expect(summarize("UKG", topics, of(failed, play("b", 2, true, Array(8).fill(true)))).recentSkills[key]).toEqual({ right: 8, total: 8 });
+    // After another quiz, the last two plays again.
+    expect(summarize("UKG", topics, of(failed, play("b", 2, true, Array(8).fill(true)), play("c", 3, false, [true, false]))).recentSkills[key])
+      .toEqual({ right: 9, total: 10 });
+  });
+
   it("says the class is complete when every topic is cleared", () => {
     const s = summarize("UKG", topics, { attempts: [], responses: [], topics: topics.map(t => ({ topicId: t.id, state: "cleared" as const, attempts: 1, bestMarks: 50 })) });
     expect(s.promoted).toBe(true);

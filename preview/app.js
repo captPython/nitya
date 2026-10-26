@@ -641,7 +641,7 @@ function renderPlacement() {
     ${optionButtons(q.options, "data-opt")}
     <p class="small muted">${look() === "play" ? "Just do your best!" : "No marks here. Just do your best!"}</p>`;
   autoSay(`placement${app.i}`, q.prompt);
-  wireTapDots();
+  wireTapDots(q.visual);
   screen.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
     app.results.push(M.checkAnswer(q, b.dataset.opt));
     app.confirmStop = false;
@@ -657,15 +657,14 @@ function renderPlacement() {
 function renderPlacementDone() {
   const { draft: d, suggestion: s } = app;
   const play = look() === "play";
-  const body = play ? "Give the phone back to your grown-up." : "Please hand the phone back to your parent.";
+  const body = play ? "Give the phone back to your grown-up." : "Please hand the phone back to your grown-up.";
   screen.innerHTML = `
     <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">All done!</h2><p>${esc(body)}</p>${sayBtn(`All done! ${body}`)}</div></div>
-    <div class="row actions"><button class="btn primary iconlabel" type="button" id="grown">${ICONS.lock}I'm the grown-up</button></div>`;
+    <div class="row actions"><button class="ghost iconlabel" type="button" id="grown">${ICONS.lock}I'm the grown-up</button></div>`;
   autoSay("placement-done", `All done! ${body}`);
-  // With more than one class to choose from, the choice is behind the PIN, so the child can't make it.
-  document.getElementById("grown").onclick = () => s.suggested !== d.classId
-    ? askPin(`To choose ${d.nickname}'s class.`, () => show({ mode: "placement-result", draft: d, suggestion: s }))
-    : show({ mode: "placement-result", draft: d, suggestion: s });
+  // The result is the grown-up's, behind the PIN, so the child can't choose the class. The button is the white one,
+  // so it doesn't invite the child the way a green "go" button would.
+  document.getElementById("grown").onclick = () => askPin(`To see how ${d.nickname} did.`, () => show({ mode: "placement-result", draft: d, suggestion: s }));
 }
 
 function renderPlacementResult() {
@@ -894,7 +893,8 @@ function renderChildProgress() {
     const e = s.progress.topics[t.id], stars = s.stars[t.id] || 0;
     const chip = e.state === "cleared" ? `<span class="chip cleared">Cleared</span>` : e.state === "current" ? `<span class="chip current">Up next</span>` : `<span class="chip">Locked</span>`;
     const meta = e.attempts ? `Best ${e.bestScore} / ${MAX} · ${e.attempts} ${e.attempts === 1 ? "try" : "tries"}${stars ? ` · ${starText(stars)}` : ""}` : e.state === "locked" ? `Opens after topic ${i}` : "Not started";
-    return `<div class="prow"><div><div class="row" style="gap:8px"><b>${esc(t.title)}</b>${chip}</div><div class="small muted">${esc(meta)}</div></div></div>`;
+    // The state chip starts the line under the title on every row, so long and short titles line up the same.
+    return `<div class="prow"><div><b>${esc(t.title)}</b><div class="small muted pmeta">${chip}<span>${esc(meta)}</span></div></div></div>`;
   }).join("");
   const open = topics.filter(t => s.progress.topics[t.id].state !== "locked");
   const areas = weakAreas(s).map(a => `<div class="area"><div><b>${esc(byId(a.tid).subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(byId(a.tid).topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
@@ -917,11 +917,11 @@ function renderChildProgress() {
       ${open.length ? `<details class="disc"><summary>Get new questions for a topic</summary>
         <p class="small muted">Adds fresh questions to a topic ${name} has seen a lot of. Families can ask ${M.NEW_QUESTIONS_PER_DAY} times a day.</p>
         ${open.map(t => `<div class="prow"><span>${esc(t.title)}</span><button class="ghost quiet" type="button" data-newq="${t.id}" ${newqBusy ? "disabled" : ""}>${newqBusy === t.id ? "Making questions…" : "Get new questions"}</button></div>`).join("")}</details>` : ""}</section>
-    <section class="setting"><h3>Improvement areas</h3><p class="small muted">From recent quizzes: a skill's last two plays, or its last one once the topic is cleared.</p>${areas || `<p class="small muted">Nothing to work on now. Skills under 80% right show up here after a quiz.</p>`}</section>
+    <section class="setting"><h3>Improvement areas</h3><p class="small muted">Based on each skill's most recent quizzes. A skill drops off this list at 80% right or more.</p>${areas || `<p class="small muted">Nothing to work on now. Skills under 80% right show up here after a quiz.</p>`}</section>
     <section class="setting"><h3>Right first time, by level</h3>${levelRows(s)}</section>
     <section class="setting"><h3>Recent quizzes</h3>
       ${recent.length ? `<ul class="qlog">${recent.map(line).join("")}</ul>` : `<p class="small muted">No quizzes yet.</p>`}
-      ${firsts.length ? `<p class="small muted">Wrong first tries in these quizzes: ${wrong} of ${firsts.length}. Each takes away ${app.penalty} ${app.penalty === 1 ? "mark" : "marks"} now. Marks never go below 0, and a quiz that reaches the pass mark keeps it.</p>` : ""}</section>
+      ${firsts.length ? `<p class="small muted">Wrong first tries in these quizzes: ${wrong} of ${firsts.length}. With ${name}'s setting each takes away ${app.penalty} ${app.penalty === 1 ? "mark" : "marks"}, but marks never go below 0, and a quiz that reaches the pass mark keeps it.</p>` : ""}</section>
     <div class="row"><button class="btn primary" type="button" id="done">Back to Grown-ups</button></div>
   </div>`;
   if (app.openTools) screen.querySelector(".disc")?.setAttribute("open", "");
@@ -934,7 +934,6 @@ function renderChildProgress() {
   document.getElementById("back").onclick = () => show({ mode: "grownups" });
 }
 
-/** Skills under 80% right first time in recent plays (see the summary's recentSkills), weakest first. */
 /** One play as one line, the same on the Progress page and in the data summary. */
 function playLine(a, rs, MAX) {
   const day = new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
@@ -945,6 +944,13 @@ function playLine(a, rs, MAX) {
   return `<li>${esc(day)} · ${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}</li>`;
 }
 
+/** Whether a practice round on the topic has been finished since its last quiz. */
+function practisedSinceQuiz(tid) {
+  const plays = data.attempts.filter(a => a.topicId === tid && a.finishedAt).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  return plays.slice(plays.map(a => a.practice).lastIndexOf(false) + 1).some(a => a.practice);
+}
+
+/** Skills under 80% right first time in recent plays (see the summary's recentSkills), weakest first. */
 function weakAreas(s) {
   return Object.entries(s.recentSkills)
     .map(([k, v]) => { const [tid, skill] = k.split("|"); return { tid, skill, acc: v.right / v.total, total: v.total }; })
@@ -1015,8 +1021,8 @@ function renderChildSettings() {
       <span class="sublabel" id="offlbl">Marks off for a wrong first try</span>
       <div class="segctl" role="group" aria-labelledby="offlbl">${[0, 1, 2].map(v => seg("data-pen", v, eff.wrongPenalty === v, v === 0 ? "None" : String(v), v === def.wrongPenalty ? "default" : "")).join("")}<button class="ghost ${eff.wrongPenalty > 2 ? "on" : ""}" type="button" data-moreoff aria-expanded="${moreOff}">More<small>3 or 4</small></button></div>
       ${moreOff ? `<div class="segctl" role="group" aria-label="More marks off">${[3, 4].map(v => seg("data-pen", v, eff.wrongPenalty === v, String(v), v === def.wrongPenalty ? "default" : "")).join("")}</div>
-        <p class="warn">3 or 4 marks off is more than an Easy question is worth (1 mark).</p>` : ""}
-      <p class="live" aria-live="polite">${name} needs <b>${eff.passMarks} of ${MAX}</b> marks (${percent}%) to clear a topic, and a wrong first try takes away ${eff.wrongPenalty === 0 ? "nothing" : marks(eff.wrongPenalty)}.</p>
+        <p class="warn">3 or 4 marks off is more than an Easy question is worth (1 mark). It still never takes ${name} below the pass mark once reached.</p>` : ""}
+      <p class="live" aria-live="polite">${name} needs <b>${eff.passMarks} of ${MAX}</b> marks (${percent}%) to clear a topic. ${eff.wrongPenalty === 0 ? "A wrong first try takes away nothing." : `A wrong first try takes away ${marks(eff.wrongPenalty)}, but never below ${eff.passMarks} once ${name} has reached it.`}</p>
       ${warn ? `<p class="warn">${warn}</p>` : ""}
       ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
       ${errorLine()}
@@ -1104,8 +1110,10 @@ function dataSummary(exp, MAX) {
       <li>${done.length} ${done.length === 1 ? "quiz" : "quizzes"} and ${v.responses.length} answers</li>
       <li>Quiz settings: ${v.quizSettings.passPercent === null ? "class default pass mark" : `${v.quizSettings.passPercent}% to pass`}, ${v.quizSettings.wrongPenalty === null ? "class default marks off" : `${v.quizSettings.wrongPenalty} off for a wrong first try`}, voice ${v.quizSettings.voice === null ? "as the look decides" : v.quizSettings.voice ? "on" : "off"}</li></ul>
     ${done.length ? `<ul class="qlog">${done.slice(-8).reverse().map(a => playLine(a, v.responses.filter(r => r.attemptId === a.id), MAX)).join("")}</ul>` : ""}
-    <details><summary>Show the raw file</summary><pre class="data">${esc(JSON.stringify(v, null, 2))}</pre></details>
-    <div class="row"><button class="ghost quiet" type="button" onclick="window.print()">Print this</button></div>
+    <div class="row"><button class="ghost" type="button" aria-expanded="false" aria-controls="rawfile"
+        onclick="const f = document.getElementById('rawfile'); f.hidden = !f.hidden; this.setAttribute('aria-expanded', !f.hidden); this.textContent = f.hidden ? 'Show the raw file' : 'Hide the raw file'">Show the raw file</button>
+      <button class="ghost" type="button" onclick="window.print()">Print the summary</button></div>
+    <pre class="data" id="rawfile" hidden>${esc(JSON.stringify(v, null, 2))}</pre>
   </div>`;
 }
 
@@ -1189,15 +1197,23 @@ function reviewCard(e) {
   const q = e.question, c = byId(q.topicId);
   const problems = e.report ? M.reportProblems(e.report) : ["It has no check report."];
   const confirming = d => app.confirm === `${d}:${q.id}`;
-  // The stored answer is only the question's key, not a verified one: it is marked when the answer check disagrees.
-  const keyBad = !!e.report && !e.report.answer.passed;
+  // The stored answer is only the question's key, not a verified one. It is marked wrong only when recomputing gives
+  // a different answer, and "not checked" when the answer couldn't be recomputed. A repeated option is tagged itself.
+  const wrong = e.report?.answer.wrongKeys ?? [], unchecked = !!e.report?.answer.unchecked;
+  const seen = new Set();
+  const chip = o => {
+    const k = String(o).trim().toLowerCase(), again = seen.has(k);
+    seen.add(k);
+    if (again) return `<span class="repeat">${esc(o)} · repeated</span>`;
+    if (!q.answers.includes(o)) return `<span>${esc(o)}</span>`;
+    if (wrong.includes(o)) return `<span class="anskey bad">Key: ${esc(o)} <b aria-label="recomputing gives a different answer">✗</b></span>`;
+    return `<span class="anskey ${unchecked ? "unchecked" : ""}">Key: ${esc(o)}${unchecked ? " · not checked" : ""}</span>`;
+  };
   return `<div class="qcard">
     <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(c?.subSkillNames[q.subSkill] ?? q.subSkill)} · ${esc(sourceLabel(q))}</div>
     <p class="prompt">${promptHtml(q.prompt)}</p>
     ${dotsSvg(q.visual)}
-    ${q.options ? `<div class="optlist">${q.options.map(o => q.answers.includes(o)
-      ? `<span class="anskey ${keyBad ? "bad" : ""}">Key: ${esc(o)}${keyBad ? ` <b aria-label="the check disagrees">✗</b>` : ""}</span>`
-      : `<span>${esc(o)}</span>`).join("")}</div>` : `<p class="small">Key: <b>${esc(q.answers.join(", "))}</b></p>`}
+    ${q.options ? `<div class="optlist">${q.options.map(chip).join("")}</div>` : `<p class="small">Key: <b>${esc(q.answers.join(", "))}</b></p>`}
     <ul class="problems">${problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
     <div class="row">
       ${M.canFixHere(q) ? `<button class="ghost tonal" type="button" data-fixq="${q.id}">${ICONS.edit}Fix</button>` : ""}
@@ -1346,13 +1362,13 @@ function renderFix() {
       ${text("hint", "Hint after a wrong first try")}
       ${text("explanation", "Working shown after a wrong answer")}
       ${text("reason", "Reason shown with the praise")}
-      ${text("picture", "Picture", 'Dots, like "3 blue, 2 orange" or "5 blue 2 crossed". Leave empty for none.')}
+      ${text("picture", "Picture", 'Dots, like "3 blue, 2 orange" or "5 blue 2 crossed". Add "count each" when each colour is counted on its own, as in comparing. Leave empty for none.')}
       ${text("working", "Working", 'How the answer is worked out, so the checks can recompute it: a sum like "4 + 3", "count dots", or JSON.')}
     </form>
     ${errorLine()}
     ${report ? `<div class="panel"><span class="label">${ready ? "Checks on your fix" : "Checks on the question now"}</span><ul class="checks">${checks}</ul></div>` : ""}
     <div class="row"><button class="ghost" type="button" id="check">Check my fix</button>
-      <button class="btn primary" type="button" id="save" ${ready ? "" : "disabled"}>${ready && !app.report.passed ? (app.confirmSave ? "Tap again to approve anyway" : "Approve with these problems") : "Save and approve"}</button>
+      <button class="btn primary" type="button" id="save">${ready && !app.report.passed ? (app.confirmSave ? "Tap again to approve anyway" : "Approve with these problems") : "Save and approve"}</button>
       <button class="ghost" type="button" id="cancel">Cancel</button></div>
   </div>`;
   const read = () => {
@@ -1363,7 +1379,9 @@ function renderFix() {
     out.subSkill = document.getElementById("f-subSkill").value;
     return out;
   };
-  document.getElementById("check").onclick = () => {
+  // Checking runs on "Check my fix", and on "Save and approve" when the fix hasn't been checked yet: the result shows
+  // above the buttons, and the next press saves.
+  const runCheck = () => {
     app.edits = read();
     app.confirmSave = false;
     // A question needs a right answer before it can be checked.
@@ -1377,7 +1395,9 @@ function renderFix() {
       app.candidate = null; app.error = err.message;
     }
     render();
+    screen.querySelector(".panel .checks")?.closest(".panel")?.scrollIntoView({ block: "nearest" });
   };
+  document.getElementById("check").onclick = runCheck;
   // The right answer is picked from the options, so it always is one of them.
   const repick = () => {
     const picked = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value);
@@ -1392,11 +1412,10 @@ function renderFix() {
   screen.querySelector("#fixform").addEventListener("input", () => {
     if (!app.candidate) return;
     app.candidate = null;
-    const save = document.getElementById("save");
-    save.disabled = true;
-    save.textContent = "Save and approve";
+    document.getElementById("save").textContent = "Save and approve";
   });
   document.getElementById("save").onclick = () => {
+    if (!app.candidate) { runCheck(); return; }
     if (!app.report.passed && !app.confirmSave) { app.confirmSave = true; render(); return; }
     step(async () => {
       await backend.reviewQuestion(q.id, { decision: "fixed", question: app.candidate, report: app.report });
@@ -1555,8 +1574,10 @@ function renderDash() {
   const upNext = topics.find(t => sum.progress.topics[t.id].state === "current");
   const starText3 = n => `${"★".repeat(n)}${"☆".repeat(3 - n)}`;
   const areas = weakAreas(sum);
-  // After two quizzes that didn't clear, the result offers practice first, so the playful map does too, in the same order.
-  const offered = play && upNext && sum.progress.topics[upNext.id].attempts >= M.PRACTICE_AFTER_FAILS && !keptQuiz(upNext.id)
+  // After two quizzes that didn't clear, the result offers practice first, so the map does too, in the same order, in
+  // both looks. One practice round since the last quiz is enough: then the quiz leads again, and any other weak skill
+  // is the owl's white card under it.
+  const offered = upNext && sum.progress.topics[upNext.id].attempts >= M.PRACTICE_AFTER_FAILS && !keptQuiz(upNext.id) && !practisedSinceQuiz(upNext.id)
     ? areas.find(a => a.tid === upNext.id) : null;
 
   const rows = topics.map((t, i) => {
@@ -1573,7 +1594,7 @@ function renderDash() {
     const glyph = e.state === "cleared" ? "✓" : e.state === "locked" ? lockIcon() : i + 1;
     if (!play) {
       // Clean: every topic is one row; open ones are a single button, so a long syllabus stays short.
-      const meta = kept ? keptAt(kept) : e.attempts ? `${e.bestScore}/${MAX}${stars ? ` · ${starText3(stars)}` : ""}` : e.state === "locked" ? `Opens after topic ${i}` : "Not started";
+      const meta = kept ? keptAt(kept) : first ? "Practice suggested" : e.attempts ? `${e.bestScore}/${MAX}${stars ? ` · ${starText3(stars)}` : ""}` : e.state === "locked" ? `Opens after topic ${i}` : "Not started";
       const node = `<span class="num" style="--p:${ring}" aria-hidden="true">${glyph}</span>`;
       const body = `${node}<span class="tmain"><span class="ttl">${esc(t.title)}</span><span class="tmeta">${e.state === "current" ? `<span class="chip current">Up next</span>` : ""}${esc(meta)}</span></span>`;
       if (e.state === "locked") return `<div class="topic locked slim">${body}</div>`;
@@ -1608,7 +1629,11 @@ function renderDash() {
   }
   // Clean keeps one "Continue" at the top, so the next step is in view however long the list.
   const keptNext = upNext ? keptQuiz(upNext.id) : null;
-  const cont = !play && upNext ? `<div class="row"><button class="btn primary wide" type="button" data-play="${upNext.id}">${keptNext ? `Carry on: ${esc(upNext.title)}<small>${keptAt(keptNext)}</small>` : `Continue: ${esc(upNext.title)}`}</button></div>` : "";
+  const offeredName = offered ? byId(offered.tid).subSkillNames[offered.skill] || offered.skill : "";
+  const cont = play || !upNext ? "" : offered
+    ? `<div class="row actions"><button class="btn primary wide" type="button" data-practice="${offered.tid}|${offered.skill}">Practise first: ${esc(offeredName)}</button>
+        <button class="ghost wide" type="button" data-play="${upNext.id}">Continue: ${esc(upNext.title)}</button></div>`
+    : `<div class="row"><button class="btn primary wide" type="button" data-play="${upNext.id}">${keptNext ? `Carry on: ${esc(upNext.title)}<small>${keptAt(keptNext)}</small>` : `Continue: ${esc(upNext.title)}`}</button></div>`;
   screen.innerHTML = `
     <div class="row" style="justify-content:space-between">
       <div class="who"><span class="emoji" aria-hidden="true">${M.avatarEmoji(child.avatar)}</span><b>${esc(child.nickname)}</b></div>
@@ -1673,13 +1698,13 @@ function renderLesson() {
     const ready = !p.visual || count.length === total;
     screen.innerHTML = `${crumbs}
       <div class="mascot">${MASCOT}<div class="bubble"><h2 tabindex="-1">${esc(p.title)}</h2><p>${esc(p.text)}</p>${sayBtn(`${p.title}. ${p.text}`)}</div></div>
-      ${p.visual ? `${tapDots(p.visual, count)}<p class="small muted center" id="counted" aria-live="polite">${count.length ? `${count.length} counted` : "Tap each dot to count it."}</p>` : ""}
+      ${p.visual ? `${tapDots(p.visual, count)}<p class="small muted center" id="counted" aria-live="polite">${countedText(p.visual, count)}</p>` : ""}
       <div class="row lessonnav">${app.page > 0 ? `<button class="ghost" type="button" id="back">Back</button>` : ""}
         <button class="btn primary ${ready && p.visual ? "ready" : ""}" type="button" id="next">Next</button></div>`;
     autoSay(`lesson${app.topicId}${app.page}`, `${p.title}. ${p.text}`);
-    wireTapDots(n => {
-      document.getElementById("counted").textContent = `${n} counted`;
-      if (n === total) document.getElementById("next").classList.add("ready");
+    wireTapDots(p.visual, n => {
+      document.getElementById("counted").textContent = countedText(p.visual, app.counted);
+      document.getElementById("next").classList.toggle("ready", n === total);
     });
     document.getElementById("next").onclick = () => { app.page++; app.counted = []; render(); };
     const back = document.getElementById("back");
@@ -1702,11 +1727,13 @@ function renderLesson() {
       <div class="row actions">${goRow}
         <button class="ghost" type="button" id="back">Back</button></div>`;
     autoSay(`try${app.topicId}`, t.prompt);
-    wireTapDots();
+    wireTapDots(t.visual);
     document.getElementById("back").onclick = () => { app.page--; app.tryPicks = []; render(); };
     screen.querySelectorAll("[data-try]:not([disabled])").forEach(b => b.onclick = () => {
       const ok = b.dataset.try === t.answer;
       app.tryPicks = [...picks, b.dataset.try];
+      // The help says to count again, so the dots are ready for it.
+      if (!ok) app.counted = [];
       chime(ok ? "good" : "gentle");
       render();
       const text = ok ? `You got it! ${t.praise}` : `Let's look again. ${hintFor(t.help, t.visual)} Try again!`;
@@ -1728,19 +1755,29 @@ function renderLesson() {
 /**
  * Dots a child taps to count: each lights up with its number, and the voice says it. Crossed-out dots are only a
  * picture, so they can't be counted by mistake. `compact` is the quiz's size: rows of 5, with groups side by side.
+ * In "each" mode (comparing) the count starts again in each group, and a counted group shows its total under it.
+ * "Count again" clears the count; it keeps its place while hidden, so nothing moves on the first tap.
  */
 function tapDots(visual, counted, compact = false) {
-  const cols = compact ? dotCols(visual.groups) : visual.groups.map(g => Math.min(5, g.count));
-  return `<div class="visual tapdots ${compact ? "compact" : ""}">${visual.groups.map((g, gi) => `<div class="dotgroup" style="--cols:${cols[gi]}">${Array.from({ length: g.count }, (_, i) => {
-    const k = `${gi}-${i}`, n = counted.indexOf(k);
-    const crossed = g.crossed && i >= g.count - g.crossed;
-    if (crossed) return `<span class="tapdot ${g.color} crossed" role="img" aria-label="${g.color} dot, crossed out"></span>`;
-    return `<button class="tapdot ${g.color} ${n >= 0 ? "counted" : ""}" type="button" data-dot="${k}" aria-label="${n >= 0 ? `Counted, ${n + 1}` : `${g.color} dot`}">${n >= 0 ? n + 1 : ""}</button>`;
-  }).join("")}</div>`).join("")}</div>`;
+  const each = visual.count === "each";
+  const cols = visual.frames ? visual.groups.map(() => 5) : compact ? dotCols(visual.groups) : visual.groups.map(g => Math.min(5, g.count));
+  const groups = visual.groups.map((g, gi) => {
+    const mine = counted.filter(k => k.startsWith(`${gi}-`));
+    const dots = Array.from({ length: g.count }, (_, i) => {
+      const k = `${gi}-${i}`, n = (each ? mine : counted).indexOf(k);
+      const crossed = g.crossed && i >= g.count - g.crossed;
+      if (crossed) return `<span class="tapdot ${g.color} crossed" role="img" aria-label="${g.color} dot, crossed out"></span>`;
+      return `<button class="tapdot ${g.color} ${n >= 0 ? "counted" : ""}" type="button" data-dot="${k}" aria-label="${n >= 0 ? `Counted, ${n + 1}` : `${g.color} dot`}">${n >= 0 ? n + 1 : ""}</button>`;
+    }).join("");
+    const total = each ? `<b class="grouptotal" aria-hidden="true">${mine.length === g.count - (g.crossed || 0) ? mine.length : ""}</b>` : "";
+    return `<div class="dotgroup ${visual.frames ? "frame" : ""}" style="--cols:${cols[gi]}">${dots}${total}</div>`;
+  }).join("");
+  return `<div class="dotbox"><div class="visual tapdots ${compact ? "compact" : ""} ${each ? "each" : ""}">${groups}</div>
+    <button class="ghost recount" type="button" id="recount" ${counted.length ? "" : "data-idle"}>↺ Count again</button></div>`;
 }
 /**
  * Columns for each group in a quiz: one group in rows of 5; two groups side by side in 6 columns between them (all
- * that fit on a 360px phone), split for the fewest rows, so 7 and 3 make two rows of 4 + 2.
+ * that fit on a 360px phone with the line between them), split for the fewest rows, so 7 and 3 make two rows of 4 + 2.
  */
 function dotCols(groups) {
   const n = groups.map(g => g.count);
@@ -1755,20 +1792,42 @@ function dotCols(groups) {
   return best.cols;
 }
 const countable = visual => visual.groups.reduce((a, g) => a + g.count - (g.crossed || 0), 0);
+/** The lesson's line under its dots: "4 counted", or for groups counted on their own, "6 blue, 2 orange". */
+function countedText(visual, counted) {
+  if (!counted.length) return "Tap each dot to count it.";
+  if (visual.count !== "each") return `${counted.length} counted`;
+  return visual.groups.map((g, gi) => `${counted.filter(k => k.startsWith(`${gi}-`)).length} ${g.color}`).join(", ");
+}
 
 /** Counts a tapped dot where it is, without rebuilding the screen. `onCount` gets how many are counted now. */
-function wireTapDots(onCount) {
-  screen.querySelectorAll("[data-dot]").forEach(b => b.onclick = () => {
+function wireTapDots(visual, onCount) {
+  const box = screen.querySelector(".dotbox");
+  if (!box || !visual) return;
+  const compact = !!box.querySelector(".tapdots.compact");
+  const recount = box.querySelector("#recount");
+  box.querySelectorAll("[data-dot]").forEach(b => b.onclick = () => {
     const count = app.counted ?? [];
     if (count.includes(b.dataset.dot)) return;
     app.counted = [...count, b.dataset.dot];
-    const n = app.counted.length;
-    if (childVoice()) speak(NUMBER_WORDS[n - 1] ?? String(n));
+    const gi = Number(b.dataset.dot.split("-")[0]), g = visual.groups[gi];
+    const n = visual.count === "each" ? app.counted.filter(k => k.startsWith(`${gi}-`)).length : app.counted.length;
+    const groupDone = visual.count === "each" && n === g.count - (g.crossed || 0);
+    const said = NUMBER_WORDS[n - 1] ?? String(n);
+    if (childVoice()) speak(groupDone ? `${said} ${g.color}` : said);
     b.classList.add("counted");
     b.textContent = n;
     b.setAttribute("aria-label", `Counted, ${n}`);
-    onCount?.(n);
+    if (groupDone) b.parentElement.querySelector(".grouptotal").textContent = n;
+    recount.removeAttribute("data-idle");
+    onCount?.(app.counted.length);
   });
+  recount.onclick = () => {
+    app.counted = [];
+    box.outerHTML = tapDots(visual, [], compact);
+    wireTapDots(visual, onCount);
+    screen.querySelector("[data-dot]")?.focus();
+    onCount?.(0);
+  };
 }
 
 /** Playful: a picture of up to 10 dots is tap-to-count, as in the lesson. More than that stays a picture in rows of 10. */
@@ -1812,16 +1871,19 @@ function goalMeter(marks, pass, { from = marks, id = "", total = 0, at = 0, star
     const spans = [[pass, M.TWO_STARS], [Math.max(pass, M.TWO_STARS), M.THREE_STARS]];
     // The star that moved last fills while the child watches; one passed on the way is already full.
     const moving = id ? spans.map(([lo, hi]) => part(lo, hi, from) !== part(lo, hi, marks)).lastIndexOf(true) : -1;
-    const slots = spans.map(([lo, hi], i) => `<span class="starslot">${starSvg(false, 36)}<span class="starfill" ${i === moving ? `id="${id}" data-to="${part(lo, hi, marks)}"` : ""} style="width:${i === moving ? part(lo, hi, from) : part(lo, hi, marks)}%">${starSvg(true, 36)}</span></span>`);
+    const slots = spans.map(([lo, hi], i) => `<span class="starslot">${starSvg(false, 32)}<span class="starfill" ${i === moving ? `id="${id}" data-to="${part(lo, hi, marks)}"` : ""} style="width:${i === moving ? part(lo, hi, from) : part(lo, hi, marks)}%">${starSvg(true, 32)}</span></span>`);
     const earned = 1 + (marks >= M.TWO_STARS) + (marks >= M.THREE_STARS);
+    // The row is its own speaker, so a pre-reader can hear what the stars mean again.
     return `<div class="marks meter goal starsphase">
-      <div class="starrow" role="img" aria-label="Flag reached! ${earned} of 3 stars so far"><span class="flagdone">${FLAG}</span>${starSvg(true, 36)}${slots.join("")}</div>${dots}</div>`;
+      <button class="starrow" type="button" data-say="${FLAG_NEWS} ${earned} of 3 stars so far." aria-label="Listen: flag reached, ${earned} of 3 stars so far"><span class="flagdone">${FLAG}</span>${starSvg(true, 32)}${slots.join("")}<span class="nodesay" aria-hidden="true">${SPEAKER}</span></button>${dots}</div>`;
   }
   return `<div class="marks meter goal">
     <div class="track" role="progressbar" aria-label="On the way to the flag" aria-valuemin="0" aria-valuemax="${pass}" aria-valuenow="${Math.min(marks, pass)}">
       <div class="fill ${reached ? "qualified" : ""}" ${id ? `id="${id}" data-to="${pct(marks)}"` : ""} style="width:${pct(from)}%"></div>
-      <span class="goalflag ${reached ? "crossed" : ""} ${reached && from < pass ? "burst" : ""}">${FLAG}</span></div>${dots}</div>`;
+      <span class="goalflag ${reached ? "crossed" : ""}">${FLAG}${reached && from < pass ? `<span class="burststar" aria-hidden="true">${starSvg(true, 28)}</span>` : ""}</span></div>${dots}</div>`;
 }
+/** What the owl says on the first question after the flag, and the star row says when tapped. */
+const FLAG_NEWS = "You reached the flag! Now fill the stars.";
 
 function marksBar() {
   const s = app.state;
@@ -1868,7 +1930,7 @@ function renderQuiz() {
         <b>Question ${qNo} of ${total}</b></div>
       <button class="ghost iconbtn" type="button" id="relesson" aria-label="See the lesson">${ICONS.book}<span class="lbl">Lesson</span></button>
       <button class="ghost iconbtn" type="button" id="stopq" aria-label="Stop the quiz">${ICONS.close}<span class="lbl">Stop</span></button></div>
-    ${app.confirmStop ? stopCard("Stop now?", `You can carry on later from question ${qNo}.`, "Stop") : ""}
+    ${app.confirmStop ? stopCard(`Stop at question ${qNo}?`, "You can carry on later.", "Stop") : ""}
     ${play && !practice ? "" : `<div class="qprog" role="progressbar" aria-label="Questions done" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">${
       Array.from({ length: total }, (_, i) => `<span class="${i < at ? "done" : i === at ? "now" : ""}"></span>`).join("")}</div>`}
     ${saveError ? `<p class="banner" role="alert">${esc(saveError)}</p>` : ""}
@@ -1879,7 +1941,10 @@ function renderQuiz() {
     ${locked ? "" : keyHint(q.options.length)}
     <div id="fb">${app.feedback ?? ""}</div>
     ${locked ? `<div class="row"><button class="btn primary wide" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button></div>` : ""}`;
-  autoSay(`q${app.playId}${s.asked.length}${app.phase}`, app.phase === "ask" ? q.prompt : app.fbText);
+  // The first question after the flag starts with the news, once, so a pre-reader knows the goal is now the stars.
+  const flagNews = play && !practice && app.phase === "ask" && s.marks >= s.passMarks && !app.flagSaid;
+  if (flagNews) app.flagSaid = true;
+  autoSay(`q${app.playId}${s.asked.length}${app.phase}`, app.phase === "ask" ? (flagNews ? `${FLAG_NEWS} ${q.prompt}` : q.prompt) : app.fbText);
 
   // The clean look's A/B/C keys answer from a keyboard, and Enter or → moves on. The playful look leaves keys alone, for little hands on a laptop.
   if (look() === "focus") document.onkeydown = e => {
@@ -1892,7 +1957,7 @@ function renderQuiz() {
   const fill = document.getElementById("fill");
   if (fill) requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = fill.dataset.to + "%"; }));
 
-  wireTapDots();
+  wireTapDots(q.visual);
   document.getElementById("relesson").onclick = () => { const saved = app; app = { mode: "lesson", topicId: saved.topicId, page: 0, peek: true, saved }; render(); };
   document.getElementById("stopq").onclick = () => { app.confirmStop = true; render(); document.getElementById("keepon")?.focus(); };
   wireStopCard(() => { keepQuiz(); goDash(); }, "stopq");
@@ -1925,8 +1990,15 @@ function answer(choice) {
       // The retry never changes the marks (see answerRetry). The clean look says what the first try cost;
       // the playful look keeps marks out of a young child's way.
       const cost = -r.result.marksDelta;
-      const note = look() === "play" ? "" : cost > 0 ? `That try cost ${cost} ${cost === 1 ? "mark" : "marks"}. Your next try is just for practice.` : "Your next try is just for practice.";
+      const marksWord = `${cost} ${cost === 1 ? "mark" : "marks"}`;
+      // At the pass mark a wrong first try costs less, or nothing, because a reached pass mark is kept; say so.
+      const capped = app.prevMarks >= app.state.passMarks && cost < app.state.wrongPenalty;
+      const note = look() === "play" ? ""
+        : capped ? (cost > 0 ? `That try cost ${marksWord} (the pass mark is kept). Your next try is just for practice.` : "No mark lost: once you reach the pass mark, you keep it. Your next try is just for practice.")
+        : cost > 0 ? `That try cost ${marksWord}. Your next try is just for practice.` : "Your next try is just for practice.";
       const hint = hintFor(r.result.hint, q.visual);
+      // The hint may say to count again, so the dots are ready for it.
+      app.counted = [];
       app.feedback = feedbackCard("gentle", "Nice try! Here's a hint.", `${hintHtml(hint)} Have another go.`, note);
       app.fbText = `Nice try! Here's a hint. ${hint} Have another go.`;
     }
@@ -1997,7 +2069,7 @@ function renderResult() {
       ${starsHtml(o.stars)}${nextStar}
       ${shownBar}
       <div class="row actions">
-        <button class="btn primary" type="button" id="nexttopic">Next topic: ${esc(next.topic.title)}</button>
+        <button class="btn primary" type="button" id="nexttopic" aria-label="Next topic: ${esc(next.topic.title)}">Next topic ▶<small>${esc(next.topic.title)}</small></button>
         <button class="ghost" type="button" id="dash">${word("map")}</button>
         <button class="ghost" type="button" id="again">${word("again")}</button>
       </div>`;
@@ -2082,9 +2154,9 @@ function renderSide() {
   side.innerHTML = `<span class="label">Tester view (not in the app)</span>
     <span class="small muted">Highlighted: level of the next question</span>
     <div class="ladder">${rungs}</div>
-    <div class="stat"><span>Marks</span><b>${s.marks} / ${maxMarks()}</b></div>
+    ${app.practiceSkill ? `<div class="stat"><span>Practice</span><b>no marks</b></div>` : `<div class="stat"><span>Marks</span><b>${s.marks} / ${maxMarks()}</b></div>`}
     <div class="stat"><span>Right first time</span><b>${s.correct} / ${s.asked.length}</b></div>
-    <div class="stat"><span>Attempt</span><b>${s.attemptNo}</b></div>
+    <div class="stat"><span>${app.practiceSkill ? "Play of this topic" : "Attempt"}</span><b>${s.attemptNo}</b></div>
     ${DEMO ? `<div class="tools"><span class="label">Tester tools</span>
       <button class="ghost" type="button" id="tright">Right</button>
       <button class="ghost" type="button" id="twrongonce">Wrong once (shows the hint)</button>

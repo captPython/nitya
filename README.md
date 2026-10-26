@@ -70,7 +70,7 @@ One question per row, with these columns (see `docs/question-template.csv`):
 | `options` | The choices, separated by `\|`. |
 | `answers` | The right answer (or answers, separated by `\|`). |
 | `hint`, `explanation`, `reason` | The hint after a wrong first try, the working shown after a wrong answer, and the one-line reason shown with the praise. |
-| `picture` | Optional dots, like `3 blue, 2 orange` or `5 blue 2 crossed`. |
+| `picture` | Optional dots, like `3 blue, 2 orange` or `5 blue 2 crossed`. End with `, count each` when a child counts each colour on its own (comparing), or `, frames` to draw each group as a ten-frame. |
 | `working` | How the answer is worked out, so the checks can recompute it: a sum like `4 + 3` or `9 - 2 - 3`, `count dots`, or JSON for other kinds (see `Working` in `src/types.ts`). Without it the question goes to review. |
 
 A row that can't be read is reported with its row number and skipped; the other rows are still saved.

@@ -107,11 +107,12 @@ export const COUNTING: TopicContent = {
   lesson: [
     { title: "One touch, one number", text: "Touch each dot once as you count. The last number is how many.", visual: dots({ count: 5, color: "blue" }) },
     { title: "Counting every day", text: "Count the stairs. Count your toys. Counting is everywhere!" },
-    { title: "Rows of 10", text: "A full row is 10. Then count on: 11, 12, 13.", visual: dots({ count: 13, color: "orange" }) },
+    { title: "Frames of 10", text: "A full frame holds 10. Then count on: 11, 12, 13.",
+      visual: { ...dots({ count: 10, color: "orange" }, { count: 3, color: "orange" }), frames: true } },
     { title: "Jumping in 2s, 5s and 10s", text: "Count in tens: 10, 20, 30. Count in twos: 2, 4, 6." },
   ],
   tryIt: { prompt: "How many dots?", visual: dots({ count: 7, color: "blue" }), options: ["6", "7", "8"], answer: "7",
-    praise: "You counted all 7 dots!", help: "Touch each dot once: 1, 2, 3, 4, 5, 6, 7." },
+    praise: "Yes! There are 7 dots.", help: "Touch each dot once: 1, 2, 3, 4, 5, 6, 7." },
   generator: { seed: SEED, templates: TEMPLATES },
   bank: buildBank(ID, SEED, TEMPLATES),
   subSkillNames: {

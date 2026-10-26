@@ -56,7 +56,8 @@ export interface ProgressSummary {
   skills: Record<string, Tally>;
   /**
    * The same, from recent plays only: the last two plays that asked the skill, or just the last one once its topic
-   * is cleared. Improvement areas use these, so a skill a child has since learned stops showing as one to work on.
+   * is cleared or when the last one was a practice round on it. Improvement areas use these, so a skill a child has
+   * since learned, or just practised well, stops showing as one to work on.
    */
   recentSkills: Record<string, Tally>;
   /** First-try results by level. */
@@ -99,8 +100,9 @@ export function summarize(classId: ClassId, topics: Topic[], data: ProfileData):
     if (r.firstTryCorrect) { skill.right++; level.right++; }
   }
   for (const [key, rs] of bySkill) {
-    const keep = progress.topics[key.split("|")[0]]?.state === "cleared" ? 1 : 2;
-    const plays = [...new Set(rs.map(r => r.attemptId))].slice(-keep);
+    const all = [...new Set(rs.map(r => r.attemptId))];
+    const keep = progress.topics[key.split("|")[0]]?.state === "cleared" || byAttempt.get(all[all.length - 1])!.practice ? 1 : 2;
+    const plays = all.slice(-keep);
     const recent = rs.filter(r => plays.includes(r.attemptId));
     summary.recentSkills[key] = { right: recent.filter(r => r.firstTryCorrect).length, total: recent.length };
   }

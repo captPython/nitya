@@ -41,9 +41,17 @@ export function parseCsv(text: string): string[][] {
   return rows.filter(r => r.some(c => c.trim() !== ""));
 }
 
-/** "3 blue, 2 orange" or "5 blue 2 crossed". */
+/**
+ * "3 blue, 2 orange" or "5 blue 2 crossed". A last part "count each" means each colour is counted on its own, as in
+ * comparing, and "frames" draws each group as a ten-frame.
+ */
 export function parsePicture(text: string): Visual {
-  const groups: DotGroup[] = text.split(",").map(part => {
+  const parts = text.split(",").map(p => p.trim());
+  const flags = { each: false, frames: false };
+  while (parts.length > 1 && /^(count each|frames)$/i.test(parts[parts.length - 1])) {
+    flags[/each/i.test(parts.pop()!) ? "each" : "frames"] = true;
+  }
+  const groups: DotGroup[] = parts.map(part => {
     const m = part.trim().match(/^(\d+)\s+(blue|orange)(?:\s+(\d+)\s+crossed)?$/i);
     if (!m) throw new Error(`Can't read the picture "${part.trim()}". Write it like "3 blue, 2 orange" or "5 blue 2 crossed".`);
     const group: DotGroup = { count: Number(m[1]), color: m[2].toLowerCase() as DotGroup["color"] };
@@ -51,7 +59,7 @@ export function parsePicture(text: string): Visual {
     if ((group.crossed ?? 0) > group.count) throw new Error(`The picture crosses out more dots than it has: "${part.trim()}".`);
     return group;
   });
-  return { kind: "dots", groups };
+  return { kind: "dots", groups, ...(flags.each ? { count: "each" as const } : {}), ...(flags.frames ? { frames: true } : {}) };
 }
 
 const KINDS = ["arith", "count-dots", "missing", "sequence", "between", "extreme", "equals", "order", "number-word"];
@@ -146,7 +154,7 @@ const quote = (cell: string) => (/[",\n\r]/.test(cell) ? `"${cell.replace(/"/g, 
 
 /** A picture as the CSV writes it, like "3 blue, 2 orange": the reverse of parsePicture. */
 export const pictureText = (v?: Visual) =>
-  v?.groups.map(g => `${g.count} ${g.color}${g.crossed ? ` ${g.crossed} crossed` : ""}`).join(", ") ?? "";
+  v ? [...v.groups.map(g => `${g.count} ${g.color}${g.crossed ? ` ${g.crossed} crossed` : ""}`), ...(v.count === "each" ? ["count each"] : []), ...(v.frames ? ["frames"] : [])].join(", ") : "";
 
 /** A working as the CSV writes it: "count dots", a plain sum like "9 - 2 - 3", or JSON. The reverse of parseWorking. */
 export function workingText(w?: Working): string {
