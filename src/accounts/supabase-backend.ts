@@ -203,12 +203,12 @@ export function supabaseBackend(
 
     async questions(topicId, pool = {}) {
       const me = (await auth.user())?.id;
-      const base = client.from("questions").select(`${QUESTION_COLUMNS}, owner`).eq("topic_id", topicId).eq("status", "approved");
+      const base = client.from("questions").select(`${QUESTION_COLUMNS}, owner, shared`).eq("topic_id", topicId).eq("status", "approved");
       // Official questions, the family's own, and with the community bank on, every shared one nobody has reported.
       const query = !me ? base.neq("source", "upload")
         : base.or(`source.neq.upload,owner.eq.${me}${pool.community ? ",and(shared.is.true,hidden_at.is.null)" : ""}`);
-      const rows = must(await query.order("id")) as unknown as (QuestionRow & { owner: string | null })[];
-      return rows.map(r => (me && r.owner === me ? { ...toQuestion(r), family: true } : toQuestion(r)));
+      const rows = must(await query.order("id")) as unknown as (QuestionRow & { owner: string | null; shared: boolean })[];
+      return rows.map(r => (me && r.owner === me ? { ...toQuestion(r), family: true } : r.shared ? { ...toQuestion(r), community: true } : toQuestion(r)));
     },
     async saveUpload(upload) {
       return await familyQuestions({ action: "upload", fileName: upload.fileName, private: upload.private, rows: upload.rows }) as UploadResult;

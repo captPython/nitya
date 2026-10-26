@@ -109,8 +109,9 @@ async function openProfile(p) {
   child = p;
   try { storage.setItem(CURRENT_KEY, p.id); } catch (e) {}
   const ids = M.contentForClass(p.classId).map(c => c.topic.id);
-  const [d, classes, mine, ...served] = await Promise.all([
-    backend.profileData(p.id), backend.classSettings(), backend.childSettings(p.id), ...ids.map(id => backend.questions(id)),
+  const mine = await backend.childSettings(p.id);
+  const [d, classes, ...served] = await Promise.all([
+    backend.profileData(p.id), backend.classSettings(), ...ids.map(id => backend.questions(id, { community: !!mine.community })),
   ]);
   data = d;
   settings = { classes, child: mine };
@@ -766,6 +767,9 @@ function renderGrownups() {
         <button class="ghost" type="button" data-settings="${p.id}">${ICONS.settings}Settings</button>
       </div></div>`).join("")}
       <button class="ghost addkid" type="button" id="add">${ICONS.plus}Add a child</button></div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><span class="label">Your own questions</span>${app.toReview ? `<span class="chip current">${app.toReview} to review</span>` : ""}</div>
+      <p class="small muted">Write questions in Nitya's template, upload them, and your children get them in their quizzes.</p>
+      <div class="row"><button class="ghost tonal" type="button" id="ownq">Your own questions${ICONS.arrow}</button></div></div>
     ${account.isAdmin
       ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each class's default pass mark and marks off, and set the level bands.</p>
           <div class="row"><button class="ghost tonal" type="button" id="admin">Open the admin panel${ICONS.arrow}</button></div></div>`
@@ -788,6 +792,7 @@ function renderGrownups() {
     await openAdmin("queue");
   });
   document.getElementById("add").onclick = () => startOnboarding();
+  document.getElementById("ownq").onclick = () => openOwnQuestions();
   document.getElementById("pin").onclick = () => show({ mode: "set-pin", first: null, then: "grownups", cancel: () => show({ mode: "grownups" }) });
   wireSignOut();
   document.getElementById("withdraw").onclick = () => show({ mode: "delete-account", back: { mode: "grownups" } });
@@ -797,6 +802,279 @@ function renderGrownups() {
     await saving;
     await openProfile(profiles.find(p => p.id === child.id) ?? child);
   });
+}
+
+/* ---------- a family's own questions, from the question template ---------- */
+const TEMPLATE_TOPICS = M.ALL_CONTENT.map(M.templateTopic);
+/** A skill's name as parents see it; uploaded questions with no skill are "Your own questions". */
+const skillName = (c, s) => c?.subSkillNames[s] || (s === M.OWN_SKILL ? M.OWN_SKILL_NAME : s);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function downloadBytes(name, bytes, type) {
+  const url = URL.createObjectURL(new Blob([bytes], { type }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function openOwnQuestions(extra = {}) {
+  await step(async () => {
+    const [uploads, own] = await Promise.all([backend.questionUploads(), backend.ownQuestions()]);
+    show({ mode: "own-questions", uploads, own, community: await communitySeen(own), keepPrivate: false, preview: null, ...extra });
+  });
+}
+
+/** The community questions the family's children got lately, newest first, so a parent can report one. */
+async function communitySeen(own) {
+  const mine = new Set(own.map(o => o.question.id));
+  const kids = await Promise.all(profiles.map(async p => ({ p, s: await backend.childSettings(p.id) })));
+  const on = kids.filter(k => k.s.community).map(k => k.p);
+  if (!on.length) return { on, seen: [] };
+  const topicIds = [...new Set(on.flatMap(p => M.contentForClass(p.classId).map(c => c.topic.id)))];
+  const pool = new Map((await Promise.all(topicIds.map(id => backend.questions(id, { community: true })))).flat()
+    .filter(q => q.community && !mine.has(q.id)).map(q => [q.id, q]));
+  const seen = [];
+  for (const p of on) {
+    const d = await backend.profileData(p.id);
+    const attempts = [...d.attempts].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    for (const a of attempts) for (const r of d.responses.filter(x => x.attemptId === a.id).reverse()) {
+      if (pool.has(r.questionId) && !seen.some(s => s.question.id === r.questionId)) seen.push({ question: pool.get(r.questionId), name: p.nickname, at: a.startedAt });
+    }
+  }
+  return { on, seen: seen.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10) };
+}
+
+function uploadNote(r) {
+  const added = r.ready + r.inReview;
+  const parts = [];
+  if (added) {
+    parts.push(`Added ${plural(added, "question", "questions")}.`);
+    if (r.ready) parts.push(`${r.ready} ${r.ready === 1 ? "is" : "are"} in your children's quizzes now${r.shared ? `, and ${r.shared} also went into the community bank` : ""}.`);
+    if (r.inReview) parts.push(`${r.inReview} ${r.inReview === 1 ? "waits" : "wait"} for you under Review.`);
+  } else parts.push("Nothing new was added.");
+  if (r.alreadyAdded) parts.push(`${plural(r.alreadyAdded, "question was", "questions were")} already added.`);
+  if (r.inNitya) parts.push(`${plural(r.inNitya, "question is", "questions are")} already one of Nitya's.`);
+  if (r.refused) parts.push(`${plural(r.refused, "row", "rows")} couldn't be added.`);
+  return parts.join(" ");
+}
+
+function previewHtml(pre) {
+  const { rows, refused } = pre.check;
+  const ready = rows.filter(r => r.status === "ready").length, review = rows.length - ready;
+  const unchecked = rows.filter(r => r.unchecked).length;
+  const where = r => (r.row ? `Row ${r.row}: ` : "");
+  return `<div class="panel preview" role="status" aria-live="polite">
+    <b>${esc(pre.fileName)}</b>
+    <p class="small">${[`${ready} ready for your children`, review ? `${review} to review` : "", refused.length ? `${plural(refused.length, "row", "rows")} Nitya can't add` : ""].filter(Boolean).join(" · ")}</p>
+    ${refused.length ? `<span class="sublabel">Fix ${refused.length === 1 ? "this row" : "these rows"} in the file, then upload it again</span>
+      <ul class="problems">${refused.map(r => `<li>${where(r)}${esc(r.problems.join(" "))}</li>`).join("")}</ul>` : ""}
+    ${unchecked ? `<p class="warn">${plural(unchecked, "question has", "questions have")} no sum to check, so Nitya couldn't work out ${unchecked === 1 ? "its answer" : "their answers"}. Please make sure ${unchecked === 1 ? "it is" : "they are"} right. ${unchecked === 1 ? "It stays" : "They stay"} out of the community bank.</p>` : ""}
+    ${rows.length ? `<div class="row"><button class="btn primary" type="button" id="addq">Add ${plural(rows.length, "question", "questions")}</button>
+      <button class="ghost" type="button" id="cancelup">Cancel</button></div>` : ""}
+  </div>`;
+}
+
+/** Choices as chips, with the right answer marked. */
+const choiceChips = q => `<div class="optlist">${(q.options ?? []).map(o => `<span class="${q.answers.includes(o) ? "anskey" : ""}">${q.answers.includes(o) ? "Answer: " : ""}${esc(o)}</span>`).join("")}</div>`;
+
+function ownCard(o) {
+  const q = o.question, c = byId(q.topicId);
+  const confirming = d => app.confirm === `${d}:${q.id}`;
+  return `<div class="qcard">
+    <div class="small muted">${esc(topicTitle(q.topicId))} · ${LEVEL_NAMES[q.level]} · ${esc(skillName(c, q.subSkill))} · ${esc(q.sourceRef ?? "")}</div>
+    <p class="prompt">${promptHtml(q.prompt)}</p>
+    ${dotsSvg(q.visual)}
+    ${choiceChips(q)}
+    <ul class="problems">${o.problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+    <div class="row">
+      <button class="ghost tonal" type="button" data-ownfix="${q.id}">${ICONS.edit}Fix</button>
+      <button class="ghost" type="button" data-own="approve" data-q="${q.id}">${confirming("approve") ? "Tap again to approve" : "Approve as it is"}</button>
+      <button class="ghost quiet danger" type="button" data-own="delete" data-q="${q.id}">${confirming("delete") ? "Tap again to delete" : `${ICONS.trash}Delete`}</button>
+    </div>
+    <p class="small muted">Approved as it is, it goes to your own children only, never into the community bank.</p>
+  </div>`;
+}
+
+function renderOwnQuestions() {
+  const review = app.own.filter(o => o.status === "review");
+  const day = iso => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const uploadLine = u => [`${u.ready} in quizzes`, u.inReview ? `${u.inReview} to review` : "", u.private ? "Private" : `${u.shared} in the community bank`].filter(Boolean).join(" · ");
+  const names = app.community.on.map(p => esc(p.nickname));
+  screen.innerHTML = `<div class="narrow">
+    ${backLink("Grown-ups")}
+    ${gbar()}<h1>Your own questions</h1>
+    <p class="muted">Write questions in Nitya's template and upload it. Questions that pass Nitya's checks go into your children's quizzes at once, before Nitya's own questions at the same level.</p>
+    ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
+    ${errorLine()}
+    <section class="setting">
+      <h3>1. Get the template</h3>
+      <p class="small muted">An Excel file with a How to fill tab, filled examples, and every class's topics and skills. It opens in Google Sheets too.</p>
+      <div class="row"><button class="ghost tonal" type="button" id="gettemplate">${ICONS.download}Download the template</button></div>
+    </section>
+    <section class="setting">
+      <h3>2. Upload it</h3>
+      <label class="check"><input type="checkbox" id="keepprivate" ${app.keepPrivate ? "checked" : ""}>
+        <span>Keep these private<small class="block-sub">Private questions stay with your family. Otherwise the ones that pass every check also go into the community bank, which other families can turn on. Your name is never shown with them.</small></span></label>
+      <div class="filepick"><label for="upfile">The filled template, as .xlsx or .csv</label>
+        <input id="upfile" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
+      ${app.preview ? previewHtml(app.preview) : ""}
+    </section>
+    ${review.length ? `<section class="setting" id="review">
+      <h3>Review · ${review.length}</h3>
+      <p class="small muted">These have an issue, so your children don't get them yet. Fix them, approve them as they are, or delete them.</p>
+      ${review.map(ownCard).join("")}
+    </section>` : ""}
+    <section class="setting">
+      <h3>Your uploads</h3>
+      ${app.uploads.length ? `<div class="family">${app.uploads.map(u => `<div class="member"><div style="grid-column:1/-1"><b>${esc(u.fileName)}</b>
+          <div class="small muted">${esc(day(u.uploadedAt))} · ${esc(uploadLine(u))}</div></div>
+        <div class="row"><button class="ghost quiet danger" type="button" data-rmupload="${u.id}">${app.confirm === `rm:${u.id}` ? "Tap again to remove its questions" : `${ICONS.trash}Remove…`}</button></div></div>`).join("")}</div>`
+        : `<p class="small muted">Nothing uploaded yet.</p>`}
+    </section>
+    <section class="setting">
+      <h3>Community questions</h3>
+      ${names.length ? `<p class="small muted">On for ${names.join(" and ")}. These are other families' questions your children got lately. Report one that is wrong or not right for a child: it is hidden from every family until Nitya's team looks at it.</p>
+        ${app.community.seen.length ? app.community.seen.map(s => reportCard(s)).join("") : `<p class="small muted">None yet.</p>`}`
+        : `<p class="small muted">Off for every child. You can turn it on in a child's Settings, so their quizzes also use other families' questions that passed every check.</p>`}
+    </section>
+  </div>`;
+
+  document.getElementById("back").onclick = () => show({ mode: "grownups" });
+  document.getElementById("gettemplate").onclick = () => {
+    try { downloadBytes(M.TEMPLATE_FILE_NAME, M.templateWorkbook(TEMPLATE_TOPICS), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); } catch (e) {}
+    app.note = `Downloaded ${M.TEMPLATE_FILE_NAME}. Fill in the Questions tab, then upload it here.`;
+    app.error = null;
+    render();
+  };
+  document.getElementById("keepprivate").onchange = e => { app.keepPrivate = e.target.checked; };
+  document.getElementById("upfile").onchange = async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const rows = await M.readTemplateFile(new Uint8Array(await file.arrayBuffer()));
+      const check = M.checkUpload(M.parseTemplate(rows, { fileName: file.name, topics: TEMPLATE_TOPICS }), TEMPLATE_TOPICS);
+      show({ ...app, preview: { fileName: file.name, check }, note: null, error: null });
+    } catch (err) {
+      show({ ...app, preview: null, note: null, error: err.message || String(err) });
+    }
+    screen.querySelector(".preview")?.scrollIntoView({ block: "nearest" });
+  };
+  const add = document.getElementById("addq");
+  if (add) add.onclick = () => step(async () => {
+    add.disabled = true;
+    const r = await backend.saveUpload({ fileName: app.preview.fileName, private: app.keepPrivate, rows: app.preview.check.rows });
+    await openOwnQuestions({ note: uploadNote(r) });
+  });
+  const cancel = document.getElementById("cancelup");
+  if (cancel) cancel.onclick = () => { app.preview = null; render(); document.getElementById("upfile").focus(); };
+  screen.querySelectorAll("[data-own]").forEach(b => b.onclick = () => {
+    const key = `${b.dataset.own}:${b.dataset.q}`;
+    if (app.confirm !== key) { app.confirm = key; render(); return; }
+    step(async () => {
+      await backend.reviewOwnQuestion(b.dataset.q, { decision: b.dataset.own });
+      await openOwnQuestions({ note: b.dataset.own === "approve" ? "Approved. Your children get it from their next quiz." : "Deleted." });
+    });
+  });
+  screen.querySelectorAll("[data-ownfix]").forEach(b => b.onclick = () => {
+    const own = app.own.find(o => o.question.id === b.dataset.ownfix);
+    show({ mode: "own-fix", own, edits: M.editsOf(own.question), problems: own.problems, back: app });
+  });
+  screen.querySelectorAll("[data-rmupload]").forEach(b => b.onclick = () => {
+    const key = `rm:${b.dataset.rmupload}`;
+    if (app.confirm !== key) { app.confirm = key; render(); return; }
+    step(async () => {
+      await backend.removeUpload(b.dataset.rmupload);
+      await openOwnQuestions({ note: "Removed. Its questions are gone from your children's quizzes and the community bank." });
+    });
+  });
+  screen.querySelectorAll("[data-report]").forEach(b => b.onclick = () => { app.reporting = b.dataset.report; app.error = null; render(); document.getElementById("reportwhy")?.focus(); });
+  const send = document.getElementById("sendreport");
+  if (send) send.onclick = () => {
+    const why = document.getElementById("reportwhy").value.trim();
+    if (!why) return needWord(document.getElementById("reportwhy"), "reporterr", "Say in a few words what is wrong with it.");
+    step(async () => {
+      await backend.reportQuestion(app.reporting, why);
+      await openOwnQuestions({ note: "Reported. It's hidden from every family until Nitya's team looks at it. Thank you." });
+    });
+  };
+  const nosend = document.getElementById("cancelreport");
+  if (nosend) nosend.onclick = () => { app.reporting = null; render(); };
+}
+
+function reportCard(s) {
+  const q = s.question, open = app.reporting === q.id;
+  return `<div class="qcard">
+    <div class="small muted">${esc(topicTitle(q.topicId))} · ${LEVEL_NAMES[q.level]} · ${esc(s.name)} got it</div>
+    <p class="prompt">${promptHtml(q.prompt)}</p>
+    ${dotsSvg(q.visual)}
+    ${choiceChips(q)}
+    ${open ? `<label for="reportwhy">What is wrong with it?</label>
+      <input id="reportwhy" type="text" maxlength="300" autocomplete="off" aria-describedby="reporterr">
+      <p class="error" id="reporterr" role="alert"></p>
+      <div class="row"><button class="ghost danger" type="button" id="sendreport">Report it</button><button class="ghost quiet" type="button" id="cancelreport">Cancel</button></div>`
+      : `<div class="row"><button class="ghost quiet" type="button" data-report="${q.id}">Report…</button></div>`}
+  </div>`;
+}
+
+/** The family's fix of one of their questions under review. Saving checks it again, where the family can't change the outcome. */
+function renderOwnFix() {
+  const q = app.own.question, c = byId(q.topicId), e = app.edits;
+  const text = (f, label, hint = "") => `<label for="f-${f}">${label}</label><input id="f-${f}" type="text" value="${esc(e[f])}" autocomplete="off">${hint ? `<p class="small muted">${hint}</p>` : ""}`;
+  const skills = [[M.OWN_SKILL, M.OWN_SKILL_NAME], ...Object.entries(c.subSkillNames)];
+  screen.innerHTML = `<div class="narrow" style="max-width:720px">
+    ${backLink("Your own questions")}
+    ${gbar()}<span class="label">Fix your question</span><h1>${esc(topicTitle(q.topicId))}</h1>
+    <p class="small muted">${esc(q.sourceRef ?? "")}</p>
+    ${app.problems.length ? `<div class="panel"><span class="label">${app.checked ? "Still to fix" : "What Nitya found"}</span><ul class="problems">${app.problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    <form id="fixform" novalidate>
+      ${text("prompt", "Question")}
+      ${text("options", "Choices", 'Separate them with "|", like 6 | 7 | 8.')}
+      <fieldset class="answerpick" aria-describedby="anserr"><legend>Right answer</legend><div class="row" id="answerpick">${answerPicks(e, false)}</div>
+        <p class="error" id="anserr" role="alert">${app.needAnswer ? "Pick the right answer." : ""}</p></fieldset>
+      <label for="f-level">Level</label><select id="f-level">${[1, 2, 3, 4].map(l => `<option value="${l}" ${String(l) === e.level ? "selected" : ""}>${l} ${LEVEL_NAMES[l]}</option>`).join("")}</select>
+      <label for="f-subSkill">Skill</label><select id="f-subSkill">${skills.map(([id, name]) => `<option value="${esc(id)}" ${id === e.subSkill ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+      ${text("hint", "Hint after a wrong first try")}
+      ${text("explanation", "Explanation after a wrong answer")}
+      ${text("reason", "Why it's right, said with the praise")}
+      ${text("picture", "Picture", 'Dots, like "4 blue, 3 orange" or "5 blue 2 crossed". Leave empty for none.')}
+      ${text("working", "Sum to check", 'Like "4 + 3", or "count dots" for a picture. With a sum, Nitya can check the answer.')}
+    </form>
+    ${errorLine()}
+    <div class="row"><button class="btn primary" type="button" id="save">Check and save</button>
+      <button class="ghost" type="button" id="cancel">Cancel</button></div>
+  </div>`;
+  const read = () => {
+    const out = {};
+    for (const f of ["prompt", "options", "hint", "explanation", "reason", "picture", "working"]) out[f] = document.getElementById(`f-${f}`).value;
+    out.answers = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value).join(" | ");
+    out.level = document.getElementById("f-level").value;
+    out.subSkill = document.getElementById("f-subSkill").value;
+    return out;
+  };
+  document.getElementById("f-options").addEventListener("input", () => {
+    const picked = [...screen.querySelectorAll("[data-ans]:checked")].map(i => i.value).slice(0, 1);
+    document.getElementById("answerpick").innerHTML = answerPicks({ options: document.getElementById("f-options").value, answers: picked.join(" | ") }, false);
+  });
+  document.getElementById("save").onclick = () => {
+    app.edits = read();
+    app.needAnswer = !app.edits.answers;
+    if (app.needAnswer) { render(); screen.querySelector("[data-ans]")?.focus(); return; }
+    let candidate;
+    try { candidate = M.applyEdits(q, app.edits); } catch (err) { app.error = err.message; render(); return; }
+    step(async () => {
+      const verdict = await backend.reviewOwnQuestion(q.id, { decision: "fix", question: candidate });
+      if (verdict.status === "ready") {
+        const shared = (await backend.ownQuestions()).find(o => o.question.id === q.id)?.shared;
+        return openOwnQuestions({ note: `Fixed. Your children get it from their next quiz${shared ? ", and it is in the community bank too" : ""}.` });
+      }
+      show({ ...app, own: { ...app.own, question: { ...candidate } }, problems: verdict.problems, checked: true, error: null });
+      toTop();
+    });
+  };
+  document.getElementById("cancel").onclick = () => openOwnQuestions();
+  document.getElementById("back").onclick = () => openOwnQuestions();
 }
 
 /* ---------- withdrawing consent: the account and everything in it ---------- */
@@ -809,8 +1087,9 @@ function renderDeleteAccount() {
     <ul class="points">
       ${profiles.length ? `<li>${names.join(", ")}: ${profiles.length === 1 ? "the profile" : "every profile"}, quiz results and progress</li>` : ""}
       <li>Your email${account.email ? ` (${esc(account.email)})` : ""} and your sign-in</li>
-      <li>The record of your consent, and your PIN</li></ul>
-    <p class="small muted">It can't be undone. Afterwards Nitya keeps nothing about your family. You can sign up again later as a new family.</p>
+      <li>The record of your consent, and your PIN</li>
+      <li>Your own questions and uploads, in your quizzes and in the community bank</li></ul>
+    <p class="small muted">It can't be undone. Afterwards Nitya keeps nothing about your family. The one exception: a community question another family's child already answered stays, without your name, so their results keep their question. You can sign up again later as a new family.</p>
     ${profiles.length ? `<div class="row"><button class="ghost" type="button" id="dlall">${ICONS.download}Download all data first</button></div>` : ""}
     ${app.downloaded ? `<p class="note" role="status">Downloaded <b>nitya-family.json</b>, with ${profiles.length} ${profiles.length === 1 ? "child" : "children"}.</p>` : ""}
     <label for="confirmdel">Type DELETE to confirm</label>
@@ -825,7 +1104,8 @@ function renderDeleteAccount() {
   const dl = document.getElementById("dlall");
   if (dl) dl.onclick = () => step(async () => {
     const children = await Promise.all(profiles.map(async p => ({ profile: p, ...(await backend.profileData(p.id)), quizSettings: await backend.childSettings(p.id) })));
-    try { download("nitya-family.json", { exportedAt: new Date().toISOString(), email: account.email, consentVersion: account.consentVersion, children }); } catch (e) {}
+    const [uploads, ownQuestions] = await Promise.all([backend.questionUploads(), backend.ownQuestions()]);
+    try { download("nitya-family.json", { exportedAt: new Date().toISOString(), email: account.email, consentVersion: account.consentVersion, children, uploads, ownQuestions }); } catch (e) {}
     show({ ...app, downloaded: true, error: null });
   });
   document.getElementById("back").onclick = () => show(app.back);
@@ -851,8 +1131,9 @@ async function loadFamily() {
   app.sums = {};
   const here = app;
   try {
-    const all = await Promise.all(profiles.map(p => backend.profileData(p.id)));
+    const [own, ...all] = await Promise.all([backend.ownQuestions(), ...profiles.map(p => backend.profileData(p.id))]);
     profiles.forEach((p, i) => { here.sums[p.id] = familyLine(p, all[i]); });
+    here.toReview = own.filter(o => o.status === "review").length;
   } catch (e) { return; }
   if (app === here) render();
 }
@@ -897,7 +1178,7 @@ function renderChildProgress() {
     return `<div class="prow"><div><b>${esc(t.title)}</b><div class="small muted pmeta">${chip}<span>${esc(meta)}</span></div></div></div>`;
   }).join("");
   const open = topics.filter(t => s.progress.topics[t.id].state !== "locked");
-  const areas = weakAreas(s).map(a => `<div class="area"><div><b>${esc(byId(a.tid).subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(byId(a.tid).topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
+  const areas = weakAreas(s).map(a => `<div class="area"><div><b>${esc(skillName(byId(a.tid), a.skill))}</b><div class="small muted">${esc(byId(a.tid).topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
       <span class="mini" aria-hidden="true"><b style="width:${a.acc * 100}%"></b></span></div>`).join("");
   const recent = [...d.attempts].filter(a => a.finishedAt).sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).slice(0, 6);
   const answersOf = a => d.responses.filter(r => r.attemptId === a.id);
@@ -938,7 +1219,7 @@ function renderChildProgress() {
 function playLine(a, rs, MAX) {
   const day = new Date(a.startedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   if (a.practice) {
-    const skill = rs[0] ? byId(a.topicId).subSkillNames[rs[0].subSkill] ?? rs[0].subSkill : "";
+    const skill = rs[0] ? skillName(byId(a.topicId), rs[0].subSkill) : "";
     return `<li>${esc(day)} · Practice${skill ? `: ${esc(skill)}` : ""} · ${rs.filter(r => r.firstTryCorrect).length} of ${rs.length}</li>`;
   }
   return `<li>${esc(day)} · ${esc(topicTitle(a.topicId))} · ${a.marks}/${MAX} ${a.cleared ? "✓ cleared" : "· not yet"}</li>`;
@@ -1041,6 +1322,12 @@ function renderChildSettings() {
       ${app.voiceNote ? `<p class="note" role="status">${esc(app.voiceNote)}</p>` : ""}
     </section>
     <section class="setting">
+      <h3>Community questions</h3>
+      <p class="small muted">Other families' questions that passed every one of Nitya's checks, asked along with Nitya's own. Any family can report one, which hides it until Nitya's team looks at it. Off unless you turn it on.</p>
+      <div class="segctl" role="group" aria-label="Community questions">${seg("data-community", "on", !!app.mine.community, "On")}${seg("data-community", "off", !app.mine.community, "Off")}</div>
+      ${app.communityNote ? `<p class="note" role="status">${esc(app.communityNote)}</p>` : ""}
+    </section>
+    <section class="setting">
       <h3>${name}'s data</h3>
       <p class="small muted">Everything Nitya keeps for ${name}, as a file you can keep.</p>
       <div class="row"><button class="ghost" type="button" data-download="${p.id}">${ICONS.download}Download ${name}'s data</button></div>
@@ -1076,6 +1363,7 @@ function renderChildSettings() {
   more.onclick = () => { app.moreOff = !moreOff; render(); };
   screen.querySelectorAll("[data-pen]").forEach(b => b.onclick = () => { app.moreOff = Number(b.dataset.pen) > 2; saveMine(def, { passPercent: app.mine.passPercent, wrongPenalty: Number(b.dataset.pen) }); });
   screen.querySelectorAll("[data-voice]").forEach(b => b.onclick = () => saveVoice(b.dataset.voice === "on"));
+  screen.querySelectorAll("[data-community]").forEach(b => b.onclick = () => saveCommunity(b.dataset.community === "on"));
   screen.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(p));
   screen.querySelectorAll("[data-download]").forEach(b => b.onclick = () => step(async () => {
     const value = { exportedAt: new Date().toISOString(), profile: p, ...(await backend.profileData(p.id)), quizSettings: await backend.childSettings(p.id) };
@@ -1108,7 +1396,7 @@ function dataSummary(exp, MAX) {
     <p class="small">Downloaded <b>nitya-${esc(exp.name)}.json</b>. Here is what it holds:</p>
     <ul class="points small"><li>Profile: ${esc(p.nickname)}, ${esc(className(p.classId))}, ${esc(boardName(p.board))}, ${esc(languageName(p.language))}, avatar ${esc(p.avatar)}</li>
       <li>${done.length} ${done.length === 1 ? "quiz" : "quizzes"} and ${v.responses.length} answers</li>
-      <li>Quiz settings: ${v.quizSettings.passPercent === null ? "class default pass mark" : `${v.quizSettings.passPercent}% to pass`}, ${v.quizSettings.wrongPenalty === null ? "class default marks off" : `${v.quizSettings.wrongPenalty} off for a wrong first try`}, voice ${v.quizSettings.voice === null ? "as the look decides" : v.quizSettings.voice ? "on" : "off"}</li></ul>
+      <li>Quiz settings: ${v.quizSettings.passPercent === null ? "class default pass mark" : `${v.quizSettings.passPercent}% to pass`}, ${v.quizSettings.wrongPenalty === null ? "class default marks off" : `${v.quizSettings.wrongPenalty} off for a wrong first try`}, voice ${v.quizSettings.voice === null ? "as the look decides" : v.quizSettings.voice ? "on" : "off"}, community questions ${v.quizSettings.community ? "on" : "off"}</li></ul>
     ${done.length ? `<ul class="qlog">${done.slice(-8).reverse().map(a => playLine(a, v.responses.filter(r => r.attemptId === a.id), MAX)).join("")}</ul>` : ""}
     <div class="row"><button class="ghost" type="button" aria-expanded="false" aria-controls="rawfile"
         onclick="const f = document.getElementById('rawfile'); f.hidden = !f.hidden; this.setAttribute('aria-expanded', !f.hidden); this.textContent = f.hidden ? 'Show the raw file' : 'Hide the raw file'">Show the raw file</button>
@@ -1118,7 +1406,7 @@ function dataSummary(exp, MAX) {
 }
 
 function saveMine(def, choice) {
-  const next = { ...choice, look: app.mine.look, voice: app.mine.voice };
+  const next = { ...choice, look: app.mine.look, voice: app.mine.voice, community: app.mine.community };
   // The default, chosen again, is kept as "the default", so it follows the admin's.
   if (next.passPercent === def.passPercent) next.passPercent = null;
   if (next.wrongPenalty === def.wrongPenalty) next.wrongPenalty = null;
@@ -1155,6 +1443,20 @@ function saveVoice(on) {
   });
 }
 
+/** Turns the community bank on or off for the child on this page. Off is stored as null, the default. */
+function saveCommunity(on) {
+  const p = app.profile;
+  const next = { ...app.mine, community: on || null };
+  step(async () => {
+    await backend.saveChildSettings(p.id, next);
+    app.mine = next;
+    if (child && child.id === p.id) settings.child = next;
+    app.communityNote = on ? `Saved. ${p.nickname}'s quizzes also use community questions, from the next quiz.` : `Saved. ${p.nickname} gets only Nitya's questions and your own.`;
+    app.note = null; app.lookNote = null; app.voiceNote = null; app.error = null;
+    render();
+  });
+}
+
 /** Saves the look for the child on this page; null lets the class decide. */
 function saveLook(choice) {
   const p = app.profile;
@@ -1172,7 +1474,7 @@ function saveLook(choice) {
 }
 
 /* ---------- the admin panel ---------- */
-const ADMIN_TABS = [["queue", "Review queue"], ["classes", "Class settings"], ["bands", "Level bands"], ["newq", "New questions"]];
+const ADMIN_TABS = [["queue", "Review queue"], ["community", "Community"], ["classes", "Class settings"], ["bands", "Level bands"], ["newq", "New questions"]];
 const CHECK_NAMES = { answer: "Right answer", options: "Options", scope: "Syllabus scope", level: "Level tag", wording: "Wording and safety" };
 const sourceLabel = q => q.source === "csv" ? `CSV: ${q.sourceRef ?? "no row"}` : q.source === "website" ? `Website: ${q.sourceRef ?? ""}` : `Template${q.sourceRef ? `: ${q.sourceRef}` : ""}`;
 const topicTitle = id => byId(id)?.topic.title ?? id;
@@ -1181,6 +1483,7 @@ async function openAdmin(tab, extra = {}) {
   await step(async () => {
     const next = { mode: "admin", tab, ...extra };
     if (tab === "queue") next.queue = await backend.reviewQueue();
+    if (tab === "community") next.reports = await backend.communityReports();
     if (tab === "classes") next.classes = await backend.classSettings();
     if (tab === "bands") next.cuts = M.cutsOf(await backend.levelBands());
     if (tab === "newq") {
@@ -1210,7 +1513,7 @@ function reviewCard(e) {
     return `<span class="anskey ${unchecked ? "unchecked" : ""}">Key: ${esc(o)}${unchecked ? " · not checked" : ""}</span>`;
   };
   return `<div class="qcard">
-    <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(c?.subSkillNames[q.subSkill] ?? q.subSkill)} · ${esc(sourceLabel(q))}</div>
+    <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(skillName(c, q.subSkill))} · ${esc(sourceLabel(q))}</div>
     <p class="prompt">${promptHtml(q.prompt)}</p>
     ${dotsSvg(q.visual)}
     ${q.options ? `<div class="optlist">${q.options.map(chip).join("")}</div>` : `<p class="small">Key: <b>${esc(q.answers.join(", "))}</b></p>`}
@@ -1224,6 +1527,24 @@ function reviewCard(e) {
   </div>`;
 }
 
+/** A reported community question, with what families said about it. */
+function communityCard(r) {
+  const q = r.question, c = byId(q.topicId);
+  const confirming = d => app.confirm === `${d}:${q.id}`;
+  return `<div class="qcard">
+    <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(skillName(c, q.subSkill))} · reported ${esc(new Date(r.firstReportedAt).toLocaleDateString("en-IN"))}</div>
+    <p class="prompt">${promptHtml(q.prompt)}</p>
+    ${dotsSvg(q.visual)}
+    ${choiceChips(q)}
+    <span class="sublabel">What families said</span>
+    <ul class="problems">${r.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+    <div class="row">
+      <button class="ghost tonal" type="button" data-moderate="keep" data-q="${q.id}">${confirming("keep") ? "Tap again to keep it" : "Keep it"}</button>
+      <button class="ghost quiet danger" type="button" data-moderate="remove" data-q="${q.id}">${confirming("remove") ? "Tap again to remove it" : `${ICONS.trash}Remove it`}</button>
+    </div>
+  </div>`;
+}
+
 function renderAdmin() {
   const tabs = `<div class="tabs" role="tablist" aria-label="Admin sections">${ADMIN_TABS.map(([id, name]) => `<button class="${app.tab === id ? "on" : ""}" type="button" role="tab"
     aria-selected="${app.tab === id}" data-tab="${id}">${esc(name)}</button>`).join("")}</div>`;
@@ -1232,6 +1553,10 @@ function renderAdmin() {
     body = app.queue.length
       ? `<p class="muted">${app.queue.length} ${app.queue.length === 1 ? "question failed" : "questions failed"} a check. Children never see a question until it is approved.</p>${app.queue.map(reviewCard).join("")}`
       : `<p class="muted">Nothing to review. Questions that fail a check wait here.</p>`;
+  } else if (app.tab === "community") {
+    body = app.reports.length
+      ? `<p class="muted">${plural(app.reports.length, "community question was", "community questions were")} reported by a family. ${app.reports.length === 1 ? "It is" : "They are"} hidden from every family until you keep or remove ${app.reports.length === 1 ? "it" : "them"}. Removing takes it out of the community bank; the family who wrote it still has it.</p>${app.reports.map(communityCard).join("")}`
+      : `<p class="muted">No reports. When a family reports a community question, it is hidden from everyone and waits here.</p>`;
   } else if (app.tab === "classes") {
     const cell = (c, f, label) => `<input type="number" inputmode="numeric" data-class="${c.classId}" data-f="${f}" value="${c[f]}" aria-label="${esc(className(c.classId))}: ${label}">`;
     body = `<p class="muted">Each class's default pass mark, as a percentage of the 68 marks a quiz can give, and the marks off for a wrong first try. Every topic in the class uses them, for every child whose parent hasn't chosen their own in Quiz settings.</p>
@@ -1275,6 +1600,15 @@ function renderAdmin() {
     step(async () => {
       await backend.reviewQuestion(b.dataset.q, { decision: b.dataset.decide });
       await openAdmin("queue", { note: b.dataset.decide === "approved" ? "Approved. Children can get it in their next quiz." : "Rejected. Children won't see it." });
+      toTop();
+    });
+  });
+  screen.querySelectorAll("[data-moderate]").forEach(b => b.onclick = () => {
+    const key = `${b.dataset.moderate}:${b.dataset.q}`;
+    if (app.confirm !== key) { app.confirm = key; render(); return; }
+    step(async () => {
+      await backend.moderateQuestion(b.dataset.q, b.dataset.moderate);
+      await openAdmin("community", { note: b.dataset.moderate === "keep" ? "Kept. It is back in the community bank." : "Removed from the community bank. Its family still has it." });
       toTop();
     });
   });
@@ -1620,7 +1954,7 @@ function renderDash() {
   // the white one, so the next stop keeps the one green button; when the stop itself says "Practise first" the card
   // would only repeat it, so it is left out.
   if (play && weakest && !offered) {
-    const skill = (byId(weakest.tid).subSkillNames[weakest.skill] || weakest.skill).toLowerCase();
+    const skill = (skillName(byId(weakest.tid), weakest.skill)).toLowerCase();
     const keptP = keptQuiz(quizKey(weakest.tid, weakest.skill));
     const card = `<div class="trail-extra"><div class="mascot">${owl("think")}<div class="bubble"><h2>Let's practise ${esc(skill)}!</h2>${sayBtn(`Let's practise ${skill}!`)}
       <div class="row"><button class="chipbtn soft" type="button" data-practice="${weakest.tid}|${weakest.skill}">${keptP ? "Carry on" : "Play"}</button></div></div></div></div>`;
@@ -1629,7 +1963,7 @@ function renderDash() {
   }
   // Clean keeps one "Continue" at the top, so the next step is in view however long the list.
   const keptNext = upNext ? keptQuiz(upNext.id) : null;
-  const offeredName = offered ? byId(offered.tid).subSkillNames[offered.skill] || offered.skill : "";
+  const offeredName = offered ? skillName(byId(offered.tid), offered.skill) : "";
   const cont = play || !upNext ? "" : offered
     ? `<div class="row actions"><button class="btn primary wide" type="button" data-practice="${offered.tid}|${offered.skill}">Practise first: ${esc(offeredName)}</button>
         <button class="ghost wide" type="button" data-play="${upNext.id}">Continue: ${esc(upNext.title)}</button></div>`
@@ -1660,7 +1994,7 @@ function renderDash() {
       <div class="panel"><span class="label">Improvement areas</span><p class="small muted">From recent quizzes.</p>${areas.length ? areas.map(a => {
         const c = byId(a.tid);
         const open = sum.progress.topics[a.tid].state !== "locked";
-        return `<div class="area"><div><b>${esc(c.subSkillNames[a.skill] || a.skill)}</b><div class="small muted">${esc(c.topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
+        return `<div class="area"><div><b>${esc(skillName(c, a.skill))}</b><div class="small muted">${esc(c.topic.title)} · ${Math.round(a.acc * 100)}% right</div></div>
           ${open ? `<button class="ghost" type="button" data-practice="${a.tid}|${a.skill}">${keptQuiz(quizKey(a.tid, a.skill)) ? "Carry on" : "Practise"}</button>` : ""}
           <span class="mini" aria-hidden="true"><b style="width:${a.acc * 100}%"></b></span></div>`;
       }).join("") : `<p class="muted small">Nothing to work on yet. After each quiz, skills under 80% show up here with a practice button.</p>`}</div>
@@ -1676,7 +2010,7 @@ function renderDash() {
   document.getElementById("grownups").onclick = () => askPin("To open the grown-ups' page.", () => show({ mode: "grownups" }));
   if (play && upNext) {
     const k = keptQuiz(upNext.id);
-    const skill = offered ? (byId(offered.tid).subSkillNames[offered.skill] || offered.skill).toLowerCase() : "";
+    const skill = offered ? (skillName(byId(offered.tid), offered.skill)).toLowerCase() : "";
     autoSay(`dash${upNext.id}${k ? "k" : ""}${offered ? "p" : ""}`, k ? `Carry on with ${upNext.title}!` : offered ? `Up next: ${upNext.title}! Let's practise ${skill} first.` : `Up next: ${upNext.title}!`);
   }
 }
@@ -1926,7 +2260,7 @@ function renderQuiz() {
   const tag = play ? "" : practice ? `<span class="lvl practice">Practice · no marks</span>` : `<span class="lvl">L${q.level} ${LEVEL_NAMES[q.level]} <i>· worth ${M.MARKS_BY_LEVEL[q.level]} ${M.MARKS_BY_LEVEL[q.level] === 1 ? "mark" : "marks"}</i></span>`;
   screen.innerHTML = `
     <div class="qtop">
-      <div class="qtitle"><span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(c.subSkillNames[app.practiceSkill])}` : ""}</span>
+      <div class="qtitle"><span class="muted small">${esc(c.topic.title)}${practice ? ` · Practice: ${esc(skillName(c, app.practiceSkill))}` : ""}</span>
         <b>Question ${qNo} of ${total}</b></div>
       <button class="ghost iconbtn" type="button" id="relesson" aria-label="See the lesson">${ICONS.book}<span class="lbl">Lesson</span></button>
       <button class="ghost iconbtn" type="button" id="stopq" aria-label="Stop the quiz">${ICONS.close}<span class="lbl">Stop</span></button></div>
@@ -2077,7 +2411,7 @@ function renderResult() {
   } else {
     const weak = o.weakSubSkills[0];
     const practise = o.offerPractice && weak;
-    const skill = weak ? (c.subSkillNames[weak] || weak).toLowerCase() : "";
+    const skill = weak ? (skillName(c, weak)).toLowerCase() : "";
     const close = o.marks >= o.passMarks * 0.75;
     let title, body;
     if (play) {
@@ -2116,7 +2450,7 @@ function starsHtml(n) {
 
 function renderPracticeDone() {
   const c = byId(app.topicId);
-  const body = `You got ${app.correct} of ${app.total} on ${c.subSkillNames[app.skill].toLowerCase()}.${look() === "play" ? "" : " Practice does not change your marks."}`;
+  const body = `You got ${app.correct} of ${app.total} on ${skillName(c, app.skill).toLowerCase()}.${look() === "play" ? "" : " Practice does not change your marks."}`;
   screen.innerHTML = `
     <div class="mascot">${owl("happy")}<div class="bubble"><h2 tabindex="-1">Practice done!</h2><p>${esc(body)}</p>${sayBtn(`Practice done! ${body}`)}</div></div>
     <div class="row actions"><button class="btn primary" type="button" id="quiz">Try the quiz again</button><button class="ghost" type="button" id="dash">${word("map")}</button></div>`;
@@ -2184,6 +2518,7 @@ const SCREENS = {
   profiles: renderProfiles, onboard: renderOnboard, "placement-offer": renderPlacementOffer, placement: renderPlacement,
   "placement-done": renderPlacementDone, "placement-result": renderPlacementResult, grownups: renderGrownups, "child-settings": renderChildSettings,
   admin: renderAdmin, fix: renderFix, "child-progress": renderChildProgress, "delete-account": renderDeleteAccount,
+  "own-questions": renderOwnQuestions, "own-fix": renderOwnFix,
   dash: renderDash, lesson: renderLesson, quiz: renderQuiz, result: renderResult, "practice-done": renderPracticeDone,
 };
 

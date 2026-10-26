@@ -217,7 +217,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
       return [
         ...official,
         ...mine.map(q => ({ ...q.question, family: true })),
-        ...(pool.community ? bank.community(topicId, me.account.userId) : []),
+        ...(pool.community ? bank.community(topicId, me.account.userId).map(q => ({ ...q, community: true })) : []),
       ];
     },
     async saveUpload(upload) {

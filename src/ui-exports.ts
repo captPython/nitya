@@ -16,3 +16,6 @@ export { LOOKS, classLook, lookFor } from "./looks";
 export { applyEdits, editsOf, recheck, canFixHere } from "./admin/review";
 export { reportProblems } from "./supply/run";
 export { NEW_QUESTIONS_PER_DAY } from "./server/new-questions";
+export {
+  templateTopic, templateWorkbook, readTemplateFile, parseTemplate, checkUpload, TEMPLATE_FILE_NAME, OWN_SKILL, OWN_SKILL_NAME, MAX_UPLOAD_ROWS,
+} from "./supply/template";

@@ -89,6 +89,8 @@ export interface Question {
   variantGroup?: string;
   /** Uploaded by the child's own family. A quiz asks these before Nitya's own questions at the same level. */
   family?: boolean;
+  /** From another family, through the community bank. */
+  community?: boolean;
 }
 
 export interface Topic {
