@@ -8,7 +8,11 @@ import type { CheckReport } from "../validation";
 import type { FamilyQuestionsBody, FamilyQuestionsReply } from "../server/family-questions";
 import type { OwnQuestion, UploadResult } from "../supply/family";
 import type { OwnVerdict } from "../supply/template";
-import type { Account, AccountBackend, CommunityReport, NewQuestionsResult, QuestionUpload } from "./backend";
+import {
+  answerCheckOf, flaggerCard, flaggerCode, flagSettingsProblems, flagSummary, NEW_STATS, NEW_TRUST, queueRank, templateKey, trustOf,
+  type FlagBox, type FlagOutcome, type FlagRow, type FlagSettings, type LevelDirection, type TrustRecord,
+} from "../flags/rules";
+import type { Account, AccountBackend, FlaggedQuestion, FlaggerCheck, MyFlag, NewQuestionsResult, QuestionUpload } from "./backend";
 import { NotAdmin, NotSignedIn } from "./backend";
 import type { Profile, ProfileDetails } from "./options";
 import type { ProfileData } from "./progress";
@@ -52,6 +56,30 @@ function must<T>(res: { data: T | null; error: { message: string } | null }): T 
   return res.data as T;
 }
 
+const FLAG_COLUMNS = `id, question_id, kind, parent_id, profile_id, boxes, level_direction, note, weight, answered_wrong,
+  seconds_after_answer, flagged_at, hide_until, burst, resolved_at, outcome`;
+interface FlagDbRow {
+  id: number; question_id: string; kind: "family" | "system"; parent_id: string | null; profile_id: string | null;
+  boxes: FlagBox[]; level_direction: LevelDirection | null; note: string | null; weight: number | string;
+  answered_wrong: boolean | null; seconds_after_answer: number | null; flagged_at: string; hide_until: string | null;
+  burst: boolean; resolved_at: string | null; outcome: "upheld" | "dismissed" | null;
+}
+const toFlag = (r: FlagDbRow): FlagRow => ({
+  id: r.id, questionId: r.question_id, kind: r.kind, parentId: r.parent_id, profileId: r.profile_id, boxes: r.boxes,
+  levelDirection: r.level_direction, note: r.note, weight: Number(r.weight), answeredWrong: r.answered_wrong,
+  secondsAfterAnswer: r.seconds_after_answer, flaggedAt: r.flagged_at, hideUntil: r.hide_until, burst: r.burst,
+  resolvedAt: r.resolved_at, outcome: r.outcome,
+});
+interface TrustDbRow { parent_id: string; upheld: number; helpful: number; dismissed: number; muted_until: string | null }
+const toTrust = (r: TrustDbRow | undefined): TrustRecord => (r ? { upheld: r.upheld, helpful: r.helpful, dismissed: r.dismissed, mutedUntil: r.muted_until } : { ...NEW_TRUST });
+/** flag_settings' columns for each number. */
+const FLAG_SETTING_COLUMNS: Record<keyof FlagSettings, string> = {
+  watchDays: "watch_days", reviewFamilies: "review_families", communityFamilies: "community_families", memoryDays: "memory_days",
+  burstFlags: "burst_flags", burstDays: "burst_days", dailyCap: "daily_cap", muteBelow: "mute_below", muteAfter: "mute_after",
+  muteDays: "mute_days", wrongChoiceShare: "wrong_choice_share", minAnswers: "min_answers",
+};
+const SETTING_KEYS = Object.keys(FLAG_SETTING_COLUMNS) as (keyof FlagSettings)[];
+
 const CLASS_SETTINGS = "class_id, pass_percent, wrong_penalty";
 interface ClassSettingsRow { class_id: ClassId; pass_percent: number; wrong_penalty: number }
 const toClassSettings = (r: ClassSettingsRow): ClassSettings => ({ classId: r.class_id, passPercent: r.pass_percent, wrongPenalty: r.wrong_penalty });
@@ -94,6 +122,11 @@ export function supabaseBackend(
   const requireAdmin = async () => {
     const id = await userId();
     if ((must(await client.from("admins").select("user_id").eq("user_id", id)) as unknown[]).length === 0) throw new NotAdmin();
+  };
+  // Only an admin can read them.
+  const flagSettings = async (): Promise<FlagSettings> => {
+    const row = must(await client.from("flag_settings").select(SETTING_KEYS.map(k => FLAG_SETTING_COLUMNS[k]).join(", ")).single()) as unknown as Record<string, number | string>;
+    return Object.fromEntries(SETTING_KEYS.map(k => [k, Number(row[FLAG_SETTING_COLUMNS[k]])])) as unknown as FlagSettings;
   };
   // The parent row is made on first sign-in; afterwards this does nothing.
   const ensureParent = async (id: string) => {
@@ -184,7 +217,7 @@ export function supabaseBackend(
     async recordResponse(r) {
       must(await client.from("quiz_responses").insert({
         attempt_id: r.attemptId, seq: r.seq, question_id: r.questionId, level: r.level,
-        first_try_correct: r.firstTryCorrect, retry_correct: r.retryCorrect, marks_delta: r.marksDelta,
+        first_try_correct: r.firstTryCorrect, retry_correct: r.retryCorrect, marks_delta: r.marksDelta, first_answer: r.firstAnswer ?? null,
       }));
     },
     async finishAttempt(attemptId, r) {
@@ -205,9 +238,12 @@ export function supabaseBackend(
       const me = (await auth.user())?.id;
       const base = client.from("questions").select(`${QUESTION_COLUMNS}, owner, shared`).eq("topic_id", topicId).eq("status", "approved");
       // Official questions, the family's own, and with the community bank on, every shared one nobody has reported.
-      const query = !me ? base.neq("source", "upload")
-        : base.or(`source.neq.upload,owner.eq.${me}${pool.community ? ",and(shared.is.true,hidden_at.is.null)" : ""}`);
-      const rows = must(await query.order("id")) as unknown as (QuestionRow & { owner: string | null; shared: boolean })[];
+      // Official questions, the family's own, and with the community bank on, every shared one. Row-level security
+      // leaves out those in flag review that may teach something wrong; the family's own flags leave out more.
+      const query = !me ? base.neq("source", "upload") : base.or(`source.neq.upload,owner.eq.${me}${pool.community ? ",shared.is.true" : ""}`);
+      const [res, hidden] = await Promise.all([query.order("id"), me ? client.rpc("my_hidden_questions", { p_profile_id: pool.profileId ?? null }) : null]);
+      const skip = new Set(hidden ? must(hidden) as string[] : []);
+      const rows = (must(res) as unknown as (QuestionRow & { owner: string | null; shared: boolean })[]).filter(r => r.owner === me || !skip.has(r.id));
       return rows.map(r => (me && r.owner === me ? { ...toQuestion(r), family: true } : r.shared ? { ...toQuestion(r), community: true } : toQuestion(r)));
     },
     async saveUpload(upload) {
@@ -246,24 +282,126 @@ export function supabaseBackend(
     async removeUpload(uploadId) {
       must(await client.rpc("remove_question_upload", { p_upload_id: uploadId }));
     },
-    async reportQuestion(questionId, reason) {
-      must(await client.rpc("report_question", { p_question_id: questionId, p_reason: reason }));
+
+    async flagQuestion(r) {
+      await ensureParent(await userId());
+      return must(await client.rpc("flag_question", {
+        p_question_id: r.questionId, p_boxes: r.boxes, p_level_direction: r.levelDirection ?? null, p_note: r.note ?? null,
+        p_profile_id: r.profileId ?? null, p_answered_wrong: r.answeredWrong ?? null,
+        p_seconds_after_answer: r.secondsAfterAnswer == null ? null : Math.round(r.secondsAfterAnswer),
+      })) as FlagOutcome;
     },
-    async communityReports() {
+    async suggestFlag(profileId, questionId, answeredWrong) {
+      must(await client.rpc("suggest_flag", { p_profile_id: profileId, p_question_id: questionId, p_answered_wrong: answeredWrong }));
+    },
+    async flagChecks() {
+      const rows = must(await client.from("flag_suggestions").select(`profile_id, answered_wrong, suggested_at, questions(${QUESTION_COLUMNS})`)
+        .order("suggested_at", { ascending: false })) as unknown as
+        { profile_id: string; answered_wrong: boolean | null; suggested_at: string; questions: QuestionRow | null }[];
+      // A question hidden for everyone meanwhile can't be read, and needs no check.
+      return rows.flatMap(r => (r.questions ? [{ profileId: r.profile_id, question: toQuestion(r.questions), answeredWrong: r.answered_wrong, suggestedAt: r.suggested_at }] : []));
+    },
+    async dismissFlagCheck(profileId, questionId) {
+      must(await client.from("flag_suggestions").delete().eq("profile_id", profileId).eq("question_id", questionId));
+    },
+    async myFlags() {
+      const rows = must(await client.rpc("my_flags")) as
+        { question: QuestionRow; boxes: FlagBox[]; flagged_at: string; state: MyFlag["state"]; until: string | null }[];
+      return rows.map((r): MyFlag => ({ question: toQuestion(r.question), boxes: r.boxes, flaggedAt: r.flagged_at, state: r.state, until: r.until }));
+    },
+
+    async flagQueue() {
       await requireAdmin();
-      const reports = must(await client.from("question_reports").select("question_id, reason, reported_at")
-        .is("resolved_at", null).order("reported_at")) as { question_id: string; reason: string; reported_at: string }[];
-      const ids = [...new Set(reports.map(r => r.question_id))];
-      if (!ids.length) return [];
-      const rows = must(await client.from("questions").select(QUESTION_COLUMNS).in("id", ids)) as unknown as QuestionRow[];
-      return ids.flatMap((id): CommunityReport[] => {
-        const row = rows.find(r => r.id === id);
-        const mine = reports.filter(r => r.question_id === id);
-        return row ? [{ question: toQuestion(row), reasons: mine.map(r => r.reason), firstReportedAt: mine[0].reported_at }] : [];
+      type Q = QuestionRow & { shared: boolean; flag_review_at: string; flag_hide_all: boolean; times_shown: number; first_try_correct: number; retries: number; retry_right: number };
+      const qs = must(await client.from("questions")
+        .select(`${QUESTION_COLUMNS}, shared, flag_review_at, flag_hide_all, times_shown, first_try_correct, retries, retry_right`)
+        .not("flag_review_at", "is", null).eq("status", "approved")) as unknown as Q[];
+      if (!qs.length) return [];
+      const ids = qs.map(q => q.id);
+      const [flagRes, pickRes, checkRes] = await Promise.all([
+        client.from("question_flags").select(FLAG_COLUMNS).in("question_id", ids).is("resolved_at", null).eq("burst", false),
+        client.from("question_choice_picks").select("question_id, choice, picks").in("question_id", ids),
+        client.from("question_checks").select("question_id, report").in("question_id", ids)
+          .order("checked_at", { ascending: false }).order("id", { ascending: false }),
+      ]);
+      const flags = (must(flagRes) as FlagDbRow[]).map(toFlag);
+      const picks = must(pickRes) as { question_id: string; choice: string; picks: number }[];
+      const checks = must(checkRes) as { question_id: string; report: CheckReport }[];
+      const families = [...new Set(flags.flatMap(f => (f.kind === "family" && f.parentId ? [f.parentId] : [])))];
+      const trust = families.length ? must(await client.from("family_trust").select("parent_id, upheld, helpful, dismissed, muted_until").in("parent_id", families)) as TrustDbRow[] : [];
+      return qs.map((q): FlaggedQuestion => {
+        const mine = flags.filter(f => f.questionId === q.id);
+        return {
+          question: toQuestion(q), community: q.shared, hiddenForAll: q.flag_hide_all, reviewSince: q.flag_review_at, ...flagSummary(mine),
+          flaggers: [...new Set(mine.flatMap(f => (f.kind === "family" && f.parentId ? [f.parentId] : [])))]
+            .map(id => ({ code: flaggerCode(id), trust: trustOf(toTrust(trust.find(t => t.parent_id === id))) })),
+          stats: {
+            ...NEW_STATS, shown: q.times_shown, firstTryRight: q.first_try_correct, retries: q.retries, retryRight: q.retry_right,
+            picks: Object.fromEntries(picks.filter(p => p.question_id === q.id).map(p => [p.choice, p.picks])),
+          },
+          answerCheck: answerCheckOf(checks.find(c => c.question_id === q.id)?.report ?? null),
+        };
+      }).sort((a, b) => queueRank(a.boxes) - queueRank(b.boxes) || a.reviewSince.localeCompare(b.reviewSince));
+    },
+    async flaggerChecks() {
+      await requireAdmin();
+      const cards = must(await client.rpc("flagger_cards")) as { parent_id: string; created_at: string; classes: ClassId[] }[];
+      if (!cards.length) return [];
+      const ids = cards.map(c => c.parent_id);
+      const [flagRes, trustRes, settings] = await Promise.all([
+        client.from("question_flags").select(FLAG_COLUMNS).in("parent_id", ids).eq("kind", "family"),
+        client.from("family_trust").select("parent_id, upheld, helpful, dismissed, muted_until").in("parent_id", ids),
+        flagSettings(),
+      ]);
+      const flags = (must(flagRes) as FlagDbRow[]).map(toFlag);
+      const trust = must(trustRes) as TrustDbRow[];
+      const waiting = [...new Set(flags.filter(f => f.burst && !f.resolvedAt).map(f => f.questionId))];
+      const questions = waiting.length ? (must(await client.from("questions").select(QUESTION_COLUMNS).in("id", waiting)) as unknown as QuestionRow[]).map(toQuestion) : [];
+      return cards.map((c): FlaggerCheck => {
+        const all = flags.filter(f => f.parentId === c.parent_id);
+        const open = new Set(all.filter(f => f.burst && !f.resolvedAt).map(f => f.questionId));
+        return {
+          ...flaggerCard(c.parent_id, all, toTrust(trust.find(t => t.parent_id === c.parent_id)), { createdAt: c.created_at, classes: c.classes }, settings, new Date()),
+          questions: questions.filter(q => open.has(q.id)),
+        };
       });
     },
-    async moderateQuestion(questionId, decision) {
-      must(await client.rpc("moderate_question", { p_question_id: questionId, p_decision: decision }));
+    async decideFlags(questionId, d) {
+      must(await client.rpc("decide_flags", {
+        p_question_id: questionId, p_decision: d.kind, p_level: d.kind === "level" ? d.level : null,
+        p_fixed: d.kind === "fix" ? questionRow(d.question) : null, p_report: d.kind === "fix" ? d.report : null,
+      }));
+    },
+    async decideFlagger(parentId, decision) {
+      must(await client.rpc("decide_flagger", { p_parent_id: parentId, p_decision: decision }));
+    },
+    async flagSettings() {
+      await requireAdmin();
+      return flagSettings();
+    },
+    async saveFlagSettings(settings) {
+      const problems = flagSettingsProblems(settings);
+      if (problems.length) throw new Error(problems.join(" "));
+      const rows = must(await client.from("flag_settings")
+        .update({ ...Object.fromEntries(SETTING_KEYS.map(k => [FLAG_SETTING_COLUMNS[k], settings[k]])), updated_at: new Date().toISOString() })
+        .eq("id", true).select("id")) as unknown[];
+      // Row-level security hides the row from anyone but an admin, so nothing changes.
+      if (rows.length !== 1) throw new NotAdmin();
+    },
+    async revealFlagger(parentId, reason) {
+      return must(await client.rpc("reveal_flagger", { p_parent_id: parentId, p_reason: reason })) as string | null;
+    },
+    async templateSiblings(questionId) {
+      await requireAdmin();
+      const row = must(await client.from("questions").select(QUESTION_COLUMNS).eq("id", questionId).maybeSingle()) as unknown as QuestionRow | null;
+      const key = row && templateKey(toQuestion(row));
+      if (!row || !key) return [];
+      const rows = must(await client.from("questions").select(QUESTION_COLUMNS).eq("topic_id", row.topic_id).eq("source", "template")
+        .eq("status", "approved").neq("id", questionId).order("id")) as unknown as QuestionRow[];
+      return rows.map(toQuestion).filter(q => templateKey(q) === key);
+    },
+    async sendToReview(entries) {
+      must(await client.rpc("send_to_review", { p_entries: entries }));
     },
     newQuestions: (topicId, profileId) => newQuestions(profileId ? { topicId, profileId } : { topicId }),
     async classSettings() {

@@ -25,6 +25,8 @@ export interface ResponseRow {
   firstTryCorrect: boolean;
   retryCorrect: boolean | null;
   marksDelta: number;
+  /** The choice the child picked first, for the question's live results. Not read back. */
+  firstAnswer?: string | null;
 }
 
 export interface TopicProgressRow {

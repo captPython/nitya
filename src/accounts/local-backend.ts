@@ -1,8 +1,9 @@
 import { bandCutsProblem, childSettingsProblem, classSettingsProblems, type ChildSettings } from "../admin/settings";
 import { ALL_CONTENT } from "../content";
+import { cleanFlag, FLAG_BOX_TEXT, flagSettingsProblems } from "../flags/rules";
 import { planFix, planUpload, type OwnQuestion } from "../supply/family";
 import { sameQuestionKey } from "../supply/template";
-import type { Account, AccountBackend, AttemptResult, NewAttempt, QuestionUpload } from "./backend";
+import type { Account, AccountBackend, AttemptResult, FlagCheck, NewAttempt, QuestionUpload } from "./backend";
 import { NoConsent, NotAdmin, NotSignedIn } from "./backend";
 import { DemoBank } from "./demo-bank";
 import type { Profile, ProfileDetails } from "./options";
@@ -16,6 +17,8 @@ export interface KeyValue {
 
 interface DemoParent {
   account: Account;
+  /** When the account was made, for the admin's flagger card. */
+  createdAt?: string;
   consentAt: string | null;
   profiles: Profile[];
   data: Record<string, ProfileData>;
@@ -51,8 +54,8 @@ const randomId = () => crypto.randomUUID();
  * It follows the database's rules (no child data before consent, one family
  * sees only its own profiles), so the screens behave as they will for real.
  */
-export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBankKey(key)): AccountBackend {
-  const bank = new DemoBank(store, bankKey);
+export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBankKey(key), now: () => Date = () => new Date()): AccountBackend {
+  const bank = new DemoBank(store, bankKey, now);
   const read = (): DemoState => {
     try {
       const s = JSON.parse(store.getItem(key) ?? "null");
@@ -71,7 +74,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
   };
   const signIn = (email: string) => {
     const s = read();
-    s.parents[email] ??= { account: { userId: randomId(), email, consentVersion: null, pinHash: null, isAdmin: false }, consentAt: null, profiles: [], data: {} };
+    s.parents[email] ??= { account: { userId: randomId(), email, consentVersion: null, pinHash: null, isAdmin: false }, createdAt: now().toISOString(), consentAt: null, profiles: [], data: {} };
     s.signedIn = email;
     s.pendingEmail = null;
     write(s);
@@ -170,6 +173,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
         delete p.data[id];
         if (p.quiz) delete p.quiz[id];
       });
+      bank.forgetProfile(id);
     },
     async profileData(profileId) {
       return change((_, p) => structuredClone(own(p, profileId)));
@@ -183,7 +187,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
         data.attempts.push({ ...attempt, finishedAt: null, marks: null, cleared: null, stars: null });
       });
     },
-    async recordResponse(response: ResponseRow) {
+    async recordResponse({ firstAnswer, ...response }: ResponseRow) {
       change((_, p) => {
         const { data } = findAttempt(p, response.attemptId);
         if (data.responses.some(r => r.attemptId === response.attemptId && (r.seq === response.seq || r.questionId === response.questionId))) {
@@ -191,6 +195,7 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
         }
         data.responses.push({ ...response });
       });
+      await bank.recordAnswer(response.questionId, { ...response, firstAnswer });
     },
     async finishAttempt(attemptId, result: AttemptResult) {
       change((_, p) => {
@@ -214,10 +219,11 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
       const me = s.signedIn ? s.parents[s.signedIn] : undefined;
       if (!me) return official;
       const mine = (me.uploads ?? []).flatMap(u => u.questions).filter(q => q.status === "ready" && q.question.topicId === topicId);
+      const hidden = bank.hidden(me.account.userId, pool.profileId ?? null);
       return [
-        ...official,
+        ...official.filter(q => !hidden.has(q.id)),
         ...mine.map(q => ({ ...q.question, family: true })),
-        ...(pool.community ? bank.community(topicId, me.account.userId).map(q => ({ ...q, community: true })) : []),
+        ...(pool.community ? bank.community(topicId, me.account.userId).filter(q => !hidden.has(q.id)).map(q => ({ ...q, community: true })) : []),
       ];
     },
     async saveUpload(upload) {
@@ -281,13 +287,73 @@ export function localBackend(store: KeyValue, key = DEMO_KEY, bankKey = demoBank
         publish(p);
       });
     },
-    async reportQuestion(questionId, reason) {
-      const text = reason.trim();
-      if (!text || text.length > 300) throw new Error("Say in a few words what is wrong with it.");
-      bank.report(questionId, signedIn().account.userId, text);
+
+    async flagQuestion(request) {
+      const parent = signedIn();
+      const clean = cleanFlag(request);
+      if (typeof clean === "string") throw new Error(clean);
+      if (request.profileId) own(parent, request.profileId);
+      if ((parent.uploads ?? []).some(u => u.questions.some(q => q.question.id === request.questionId))) {
+        // The family's own question: it goes to their own Review, where they can fix it.
+        change((_, p) => {
+          const { q } = findOwn(p, request.questionId);
+          const said = `You flagged it: ${clean.boxes.map(b => FLAG_BOX_TEXT[b].label).join(", ")}${clean.note ? ` ("${clean.note}")` : ""}.`;
+          Object.assign(q, { status: "review", shared: false, problems: [...q.problems.filter(x => !x.startsWith("You flagged it:")), said] });
+          publish(p);
+        });
+        return "own-review";
+      }
+      return bank.flag(parent.account.userId, {
+        createdAt: parent.createdAt ?? null, classes: [...new Set(parent.profiles.map(p => p.classId))], email: parent.account.email,
+      }, request);
     },
-    async communityReports() { admin(); return bank.reports(); },
-    async moderateQuestion(questionId, decision) { admin(); bank.moderate(questionId, decision); },
+    async suggestFlag(profileId, questionId, answeredWrong) {
+      const parent = signedIn();
+      own(parent, profileId);
+      const mine = (parent.uploads ?? []).some(u => u.questions.some(q => q.question.id === questionId));
+      if (!mine && !(await bank.isServed(questionId))) throw new Error("That question isn't in Nitya's quizzes.");
+      bank.suggest(parent.account.userId, profileId, questionId, answeredWrong);
+    },
+    async flagChecks() {
+      const parent = signedIn();
+      const out: FlagCheck[] = [];
+      for (const x of bank.suggestions(parent.account.userId)) {
+        if (!parent.profiles.some(p => p.id === x.profileId)) continue;
+        const question = (parent.uploads ?? []).flatMap(u => u.questions).find(q => q.question.id === x.questionId)?.question ?? await bank.question(x.questionId);
+        if (question) out.push({ profileId: x.profileId, question: structuredClone(question), answeredWrong: x.answeredWrong, suggestedAt: x.suggestedAt });
+      }
+      return out.sort((a, b) => b.suggestedAt.localeCompare(a.suggestedAt));
+    },
+    async dismissFlagCheck(profileId, questionId) {
+      const parent = signedIn();
+      own(parent, profileId);
+      bank.dismissSuggestion(parent.account.userId, profileId, questionId);
+    },
+    async myFlags() { return bank.myFlags(signedIn().account.userId); },
+
+    async flagQueue() { admin(); return bank.queue(); },
+    async flaggerChecks() { admin(); return bank.flaggerChecks(); },
+    async decideFlags(questionId, decision) {
+      admin();
+      if (decision.kind === "level" && ![1, 2, 3, 4].includes(decision.level)) throw new Error("Pick a level from 1 to 4.");
+      await bank.decide(questionId, decision);
+    },
+    async decideFlagger(parentId, decision) { admin(); await bank.decideFlagger(parentId, decision); },
+    async flagSettings() { admin(); return bank.flagSettings(); },
+    async saveFlagSettings(settings) {
+      admin();
+      const problems = flagSettingsProblems(settings);
+      if (problems.length) throw new Error(problems.join(" "));
+      bank.saveFlagSettings(settings);
+    },
+    async revealFlagger(parentId, reason) {
+      admin();
+      const why = reason.trim();
+      if (why.length < 10 || why.length > 300) throw new Error("Say in a sentence why you need this family's email.");
+      return bank.reveal(parentId, why, signedIn().account.email ?? signedIn().account.userId);
+    },
+    async templateSiblings(questionId) { admin(); return bank.siblings(questionId); },
+    async sendToReview(entries) { admin(); await bank.sendToReview(entries); },
     async newQuestions(topicId, profileId) {
       const parent = signedIn();
       if (profileId) own(parent, profileId);

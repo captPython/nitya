@@ -111,7 +111,7 @@ async function openProfile(p) {
   const ids = M.contentForClass(p.classId).map(c => c.topic.id);
   const mine = await backend.childSettings(p.id);
   const [d, classes, ...served] = await Promise.all([
-    backend.profileData(p.id), backend.classSettings(), ...ids.map(id => backend.questions(id, { community: !!mine.community })),
+    backend.profileData(p.id), backend.classSettings(), ...ids.map(id => backend.questions(id, { community: !!mine.community, profileId: p.id })),
   ]);
   data = d;
   settings = { classes, child: mine };
@@ -140,7 +140,7 @@ async function askNewQuestions(topicId, profileId) {
     app.newqNote = r.added
       ? `${r.added} new questions added to ${title}.${held}`
       : `${title} has no new questions left to make right now.${held}`;
-    const fresh = await backend.questions(topicId);
+    const fresh = await backend.questions(topicId, child ? { community: !!settings.child?.community, profileId: child.id } : {});
     if (fresh.length) banks[topicId] = fresh;
   } catch (e) {
     app.newqNote = `Couldn't make new questions: ${e.message}`;
@@ -767,11 +767,14 @@ function renderGrownups() {
         <button class="ghost" type="button" data-settings="${p.id}">${ICONS.settings}Settings</button>
       </div></div>`).join("")}
       <button class="ghost addkid" type="button" id="add">${ICONS.plus}Add a child</button></div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><span class="label">Check questions</span>${app.toCheck ? `<span class="chip current">${app.toCheck} from your children</span>` : ""}</div>
+      <p class="small muted">Tell Nitya when a question is wrong, and see what your children said was wrong.</p>
+      <div class="row"><button class="ghost tonal" type="button" id="checkq">Check questions${ICONS.arrow}</button></div></div>
     <div class="panel"><div class="row" style="justify-content:space-between"><span class="label">Your own questions</span>${app.toReview ? `<span class="chip current">${app.toReview} to review</span>` : ""}</div>
       <p class="small muted">Write questions in Nitya's template, upload them, and your children get them in their quizzes.</p>
       <div class="row"><button class="ghost tonal" type="button" id="ownq">Your own questions${ICONS.arrow}</button></div></div>
     ${account.isAdmin
-      ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check, set each class's default pass mark and marks off, and set the level bands.</p>
+      ? `<div class="panel"><span class="label">Admin</span><p class="small muted">Check questions that failed a check or that families flagged, set each class's default pass mark and marks off, and set the level bands.</p>
           <div class="row"><button class="ghost tonal" type="button" id="admin">Open the admin panel${ICONS.arrow}</button></div></div>`
       : DEMO ? `<div class="panel"><span class="label">Admin (demo)</span><p class="small muted">In the real app only Nitya's admin sees the admin panel. In the demo you can try it.</p>
           <div class="row"><button class="ghost tonal" type="button" id="demoadmin">Make me the admin${ICONS.arrow}</button></div></div>` : ""}
@@ -793,6 +796,7 @@ function renderGrownups() {
   });
   document.getElementById("add").onclick = () => startOnboarding();
   document.getElementById("ownq").onclick = () => openOwnQuestions();
+  document.getElementById("checkq").onclick = () => openCheckQuestions();
   document.getElementById("pin").onclick = () => show({ mode: "set-pin", first: null, then: "grownups", cancel: () => show({ mode: "grownups" }) });
   wireSignOut();
   document.getElementById("withdraw").onclick = () => show({ mode: "delete-account", back: { mode: "grownups" } });
@@ -822,28 +826,9 @@ function downloadBytes(name, bytes, type) {
 async function openOwnQuestions(extra = {}) {
   await step(async () => {
     const [uploads, own] = await Promise.all([backend.questionUploads(), backend.ownQuestions()]);
-    show({ mode: "own-questions", uploads, own, community: await communitySeen(own), keepPrivate: false, preview: null, ...extra });
+    const kids = await Promise.all(profiles.map(async p => ({ p, s: await backend.childSettings(p.id) })));
+    show({ mode: "own-questions", uploads, own, communityOn: kids.filter(k => k.s.community).map(k => k.p), keepPrivate: false, preview: null, ...extra });
   });
-}
-
-/** The community questions the family's children got lately, newest first, so a parent can report one. */
-async function communitySeen(own) {
-  const mine = new Set(own.map(o => o.question.id));
-  const kids = await Promise.all(profiles.map(async p => ({ p, s: await backend.childSettings(p.id) })));
-  const on = kids.filter(k => k.s.community).map(k => k.p);
-  if (!on.length) return { on, seen: [] };
-  const topicIds = [...new Set(on.flatMap(p => M.contentForClass(p.classId).map(c => c.topic.id)))];
-  const pool = new Map((await Promise.all(topicIds.map(id => backend.questions(id, { community: true })))).flat()
-    .filter(q => q.community && !mine.has(q.id)).map(q => [q.id, q]));
-  const seen = [];
-  for (const p of on) {
-    const d = await backend.profileData(p.id);
-    const attempts = [...d.attempts].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    for (const a of attempts) for (const r of d.responses.filter(x => x.attemptId === a.id).reverse()) {
-      if (pool.has(r.questionId) && !seen.some(s => s.question.id === r.questionId)) seen.push({ question: pool.get(r.questionId), name: p.nickname, at: a.startedAt });
-    }
-  }
-  return { on, seen: seen.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10) };
 }
 
 function uploadNote(r) {
@@ -901,7 +886,7 @@ function renderOwnQuestions() {
   const review = app.own.filter(o => o.status === "review");
   const day = iso => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   const uploadLine = u => [`${u.ready} in quizzes`, u.inReview ? `${u.inReview} to review` : "", u.private ? "Private" : `${u.shared} in the community bank`].filter(Boolean).join(" · ");
-  const names = app.community.on.map(p => esc(p.nickname));
+  const names = app.communityOn.map(p => esc(p.nickname));
   screen.innerHTML = `<div class="narrow">
     ${backLink("Grown-ups")}
     ${gbar()}<h1>Your own questions</h1>
@@ -935,8 +920,7 @@ function renderOwnQuestions() {
     </section>
     <section class="setting">
       <h3>Community questions</h3>
-      ${names.length ? `<p class="small muted">On for ${names.join(" and ")}. These are other families' questions your children got lately. Report one that is wrong or not right for a child: it is hidden from every family until Nitya's team looks at it.</p>
-        ${app.community.seen.length ? app.community.seen.map(s => reportCard(s)).join("") : `<p class="small muted">None yet.</p>`}`
+      ${names.length ? `<p class="small muted">On for ${names.join(" and ")}. If one of them is wrong, flag it under Check questions on the Grown-ups page.</p>`
         : `<p class="small muted">Off for every child. You can turn it on in a child's Settings, so their quizzes also use other families' questions that passed every check.</p>`}
     </section>
   </div>`;
@@ -989,33 +973,107 @@ function renderOwnQuestions() {
       await openOwnQuestions({ note: "Removed. Its questions are gone from your children's quizzes and the community bank." });
     });
   });
-  screen.querySelectorAll("[data-report]").forEach(b => b.onclick = () => { app.reporting = b.dataset.report; app.error = null; render(); document.getElementById("reportwhy")?.focus(); });
-  const send = document.getElementById("sendreport");
-  if (send) send.onclick = () => {
-    const why = document.getElementById("reportwhy").value.trim();
-    if (!why) return needWord(document.getElementById("reportwhy"), "reporterr", "Say in a few words what is wrong with it.");
-    step(async () => {
-      await backend.reportQuestion(app.reporting, why);
-      await openOwnQuestions({ note: "Reported. It's hidden from every family until Nitya's team looks at it. Thank you." });
-    });
-  };
-  const nosend = document.getElementById("cancelreport");
-  if (nosend) nosend.onclick = () => { app.reporting = null; render(); };
 }
 
-function reportCard(s) {
-  const q = s.question, open = app.reporting === q.id;
+/* ---------- flagging questions (grown-ups) ---------- */
+async function openCheckQuestions(extra = {}) {
+  await step(async () => {
+    const [checks, mine, recent] = await Promise.all([backend.flagChecks(), backend.myFlags(), recentQuestions()]);
+    show({ mode: "check-questions", checks, mine, recent, flagging: null, flagDraft: null, ...extra });
+  });
+}
+
+/** The questions the family's children got in their latest plays, newest first, leaving out any hidden for the family. */
+async function recentQuestions() {
+  const plays = (await Promise.all(profiles.map(async p => ({ p, d: await backend.profileData(p.id) }))))
+    .flatMap(({ p, d }) => d.attempts.map(a => ({ p, a, rs: d.responses.filter(r => r.attemptId === a.id) })))
+    .sort((x, y) => y.a.startedAt.localeCompare(x.a.startedAt));
+  const seen = [];
+  for (const { p, a, rs } of plays) for (const r of [...rs].reverse()) {
+    if (seen.length < 12 && !seen.some(x => x.id === r.questionId)) seen.push({ id: r.questionId, topicId: a.topicId, name: p.nickname, profileId: p.id, wrong: !r.firstTryCorrect });
+  }
+  const topicIds = [...new Set(seen.map(x => x.topicId))];
+  const pool = new Map((await Promise.all(topicIds.map(id => backend.questions(id, { community: true })))).flat().map(q => [q.id, q]));
+  return seen.filter(x => pool.has(x.id)).map(x => ({ ...x, question: pool.get(x.id) }));
+}
+
+const FLAG_STATES = {
+  watching: f => (f.until ? `Hidden for your family until ${new Date(f.until).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}, while Nitya waits to see if other families flag it.` : "Hidden for your family while Nitya's team looks at your flags."),
+  back: () => "Back in quizzes. No other family found a problem.",
+  review: () => "Nitya's team is checking it.",
+  upheld: () => "Nitya's team agreed, and fixed it or took it out. Thank you!",
+  dismissed: () => "Nitya's team checked it and kept it as it is.",
+};
+
+/** A question a grown-up can flag: from a child's tap (with Looks fine) or from a recent quiz. */
+function flagCandidate(q, line, { profileId, wrong, fine = false }) {
+  const open = app.flagging?.questionId === q.id && app.flagging.profileId === profileId;
   return `<div class="qcard">
-    <div class="small muted">${esc(topicTitle(q.topicId))} · ${LEVEL_NAMES[q.level]} · ${esc(s.name)} got it</div>
+    <div class="small muted">${line}</div>
     <p class="prompt">${promptHtml(q.prompt)}</p>
     ${dotsSvg(q.visual)}
     ${choiceChips(q)}
-    ${open ? `<label for="reportwhy">What is wrong with it?</label>
-      <input id="reportwhy" type="text" maxlength="300" autocomplete="off" aria-describedby="reporterr">
-      <p class="error" id="reporterr" role="alert"></p>
-      <div class="row"><button class="ghost danger" type="button" id="sendreport">Report it</button><button class="ghost quiet" type="button" id="cancelreport">Cancel</button></div>`
-      : `<div class="row"><button class="ghost quiet" type="button" data-report="${q.id}">Report…</button></div>`}
+    ${open ? flagForm() : `<div class="row">
+      <button class="ghost tonal" type="button" data-flagq="${q.id}" data-profile="${profileId}" data-wrong="${wrong}">Flag it…</button>
+      ${fine ? `<button class="ghost" type="button" data-fine="${q.id}" data-profile="${profileId}">Looks fine</button>` : ""}</div>`}
   </div>`;
+}
+
+function renderCheckQuestions() {
+  const name = id => esc(profiles.find(p => p.id === id)?.nickname ?? "A child");
+  const tried = wrong => (wrong === null ? "" : wrong ? " after getting it wrong" : " after getting it right");
+  const boxNames = boxes => boxes.map(b => M.FLAG_BOX_TEXT[b].label).join(", ");
+  screen.innerHTML = `<div class="narrow">
+    ${backLink("Grown-ups")}
+    ${gbar()}<h1>Check questions</h1>
+    <p class="muted">Flag a question that is wrong. Your family stops getting it at once. If other families flag it too, or it may not be right for a child, Nitya's team checks it and fixes it or takes it out.</p>
+    ${app.note ? `<p class="note" role="status">${esc(app.note)}</p>` : ""}
+    ${errorLine()}
+    <section class="setting">
+      <h3>Your children said something's wrong${app.checks.length ? ` · ${app.checks.length}` : ""}</h3>
+      ${app.checks.length
+        ? `<p class="small muted">Your child doesn't get these questions until you look. Flag one if you agree, or tap Looks fine to give it back.</p>
+          ${app.checks.map(c => flagCandidate(c.question, `${name(c.profileId)} tapped Something's wrong?${tried(c.answeredWrong)} · ${esc(topicTitle(c.question.topicId))}`, { profileId: c.profileId, wrong: c.answeredWrong, fine: true })).join("")}`
+        : `<p class="small muted">Nothing to check. Children up to Class 5 can tap Something's wrong? after a question, and it waits here for you.</p>`}
+    </section>
+    <section class="setting">
+      <h3>Questions your children got lately</h3>
+      ${app.recent.length
+        ? app.recent.map(r => flagCandidate(r.question, `${esc(r.name)} got it ${r.wrong ? "wrong first" : "right"} · ${esc(topicTitle(r.question.topicId))}`, { profileId: r.profileId, wrong: r.wrong })).join("")
+        : `<p class="small muted">None yet. Questions show here once your children play.</p>`}
+    </section>
+    <section class="setting">
+      <h3>Your flags</h3>
+      ${app.mine.length ? `<div class="family">${app.mine.map(f => `<div class="member"><div style="grid-column:1/-1">
+          <b>${promptHtml(f.question.prompt)}</b>
+          <div class="small muted">${esc(boxNames(f.boxes))} · flagged ${esc(new Date(f.flaggedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))}</div>
+          <div class="small">${esc(FLAG_STATES[f.state](f))}</div></div></div>`).join("")}</div>`
+        : `<p class="small muted">You haven't flagged a question yet.</p>`}
+    </section>
+  </div>`;
+  document.getElementById("back").onclick = () => show({ mode: "grownups" });
+  screen.querySelectorAll("[data-flagq]").forEach(b => b.onclick = () => {
+    app.flagging = { questionId: b.dataset.flagq, profileId: b.dataset.profile, answeredWrong: b.dataset.wrong === "true" ? true : b.dataset.wrong === "false" ? false : null };
+    app.flagDraft = null;
+    app.note = null;
+    render();
+    screen.querySelector("[data-flagbox]")?.focus();
+  });
+  screen.querySelectorAll("[data-fine]").forEach(b => b.onclick = () => step(async () => {
+    await backend.dismissFlagCheck(b.dataset.profile, b.dataset.fine);
+    await openCheckQuestions({ note: `Thanks for checking. ${profiles.find(p => p.id === b.dataset.profile)?.nickname ?? "Your child"} can get it again.` });
+  }));
+  wireFlagForm(async request => {
+    const f = app.flagging;
+    const outcome = await backend.flagQuestion({ ...request, questionId: f.questionId, profileId: f.profileId, answeredWrong: f.answeredWrong });
+    const notes = {
+      watching: "Flagged. Your family won't get it while Nitya watches for other families' flags. Thank you!",
+      review: "Flagged. Nitya's team will check it, and your family won't get it until then. Thank you!",
+      "own-review": "That is one of your own questions, so it waits for you under Your own questions, in Review.",
+    };
+    await openCheckQuestions({ note: notes[outcome] });
+    toTop();
+  }, () => { const id = app.flagging.questionId; app.flagging = null; render(); screen.querySelector(`[data-flagq="${id}"]`)?.focus(); });
 }
 
 /** The family's fix of one of their questions under review. Saving checks it again, where the family can't change the outcome. */
@@ -1131,9 +1189,10 @@ async function loadFamily() {
   app.sums = {};
   const here = app;
   try {
-    const [own, ...all] = await Promise.all([backend.ownQuestions(), ...profiles.map(p => backend.profileData(p.id))]);
+    const [own, checks, ...all] = await Promise.all([backend.ownQuestions(), backend.flagChecks(), ...profiles.map(p => backend.profileData(p.id))]);
     profiles.forEach((p, i) => { here.sums[p.id] = familyLine(p, all[i]); });
     here.toReview = own.filter(o => o.status === "review").length;
+    here.toCheck = checks.length;
   } catch (e) { return; }
   if (app === here) render();
 }
@@ -1474,7 +1533,7 @@ function saveLook(choice) {
 }
 
 /* ---------- the admin panel ---------- */
-const ADMIN_TABS = [["queue", "Review queue"], ["community", "Community"], ["classes", "Class settings"], ["bands", "Level bands"], ["newq", "New questions"]];
+const ADMIN_TABS = [["queue", "Review queue"], ["flags", "Flags"], ["classes", "Class settings"], ["bands", "Level bands"], ["newq", "New questions"]];
 const CHECK_NAMES = { answer: "Right answer", options: "Options", scope: "Syllabus scope", level: "Level tag", wording: "Wording and safety" };
 const sourceLabel = q => q.source === "csv" ? `CSV: ${q.sourceRef ?? "no row"}` : q.source === "website" ? `Website: ${q.sourceRef ?? ""}` : `Template${q.sourceRef ? `: ${q.sourceRef}` : ""}`;
 const topicTitle = id => byId(id)?.topic.title ?? id;
@@ -1483,7 +1542,7 @@ async function openAdmin(tab, extra = {}) {
   await step(async () => {
     const next = { mode: "admin", tab, ...extra };
     if (tab === "queue") next.queue = await backend.reviewQueue();
-    if (tab === "community") next.reports = await backend.communityReports();
+    if (tab === "flags") [next.flagged, next.flaggers, next.flagSettings] = await Promise.all([backend.flagQueue(), backend.flaggerChecks(), backend.flagSettings()]);
     if (tab === "classes") next.classes = await backend.classSettings();
     if (tab === "bands") next.cuts = M.cutsOf(await backend.levelBands());
     if (tab === "newq") {
@@ -1527,22 +1586,96 @@ function reviewCard(e) {
   </div>`;
 }
 
-/** A reported community question, with what families said about it. */
-function communityCard(r) {
-  const q = r.question, c = byId(q.topicId);
+const boxLine = boxes => M.FLAG_BOXES.filter(b => boxes[b]).map(b => `${M.FLAG_BOX_TEXT[b].label} ${boxes[b]}`).join(" · ");
+const pctOf = (n, of) => (of ? `${Math.round((n / of) * 100)}%` : "–");
+
+/** A flagged question waiting for the admin, with what families and children's answers say. */
+function flaggedCard(f) {
+  const q = f.question, c = byId(q.topicId), s = f.stats;
   const confirming = d => app.confirm === `${d}:${q.id}`;
+  const dirs = [f.levelDirections.easy ? `too easy ${f.levelDirections.easy}` : "", f.levelDirections.hard ? `too hard ${f.levelDirections.hard}` : ""].filter(Boolean).join(", ");
+  const official = !f.community;
   return `<div class="qcard">
-    <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(skillName(c, q.subSkill))} · reported ${esc(new Date(r.firstReportedAt).toLocaleDateString("en-IN"))}</div>
+    <div class="small muted">${esc(topicTitle(q.topicId))} · L${q.level} ${LEVEL_NAMES[q.level]} · ${esc(skillName(c, q.subSkill))} · ${f.community ? "Community question" : esc(sourceLabel(q))}</div>
+    <div class="row"><span class="chip ${f.hiddenForAll ? "current" : ""}">${f.hiddenForAll ? "Hidden for every child" : "Still in quizzes"}</span>
+      <span class="small muted">In review since ${esc(new Date(f.reviewSince).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))}</span></div>
     <p class="prompt">${promptHtml(q.prompt)}</p>
     ${dotsSvg(q.visual)}
     ${choiceChips(q)}
-    <span class="sublabel">What families said</span>
-    <ul class="problems">${r.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+    ${f.answerCheck === "disagrees" ? `<p class="warn">Nitya's answer check says the marked answer is wrong.</p>` : f.answerCheck === "unchecked" ? `<p class="small muted">Nitya couldn't work out this answer, so it is unchecked.</p>` : ""}
+    <p class="small"><b>Flags:</b> ${esc(boxLine(f.boxes))}${dirs ? ` (${esc(dirs)})` : ""}</p>
+    ${f.notes.length ? `<span class="sublabel">Families said</span><ul class="problems">${f.notes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    ${f.signals.length ? `<span class="sublabel">Children's answers say</span><ul class="problems">${f.signals.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    <p class="small muted">Played ${plural(s.shown, "time", "times")} · ${pctOf(s.firstTryRight, s.shown)} right first time · ${pctOf(s.retryRight, s.retries)} right after the hint${f.flaggers.length ? ` · flagged by ${f.flaggers.map(x => `${esc(x.code)} (trust ${x.trust})`).join(", ")}` : ""}</p>
     <div class="row">
-      <button class="ghost tonal" type="button" data-moderate="keep" data-q="${q.id}">${confirming("keep") ? "Tap again to keep it" : "Keep it"}</button>
-      <button class="ghost quiet danger" type="button" data-moderate="remove" data-q="${q.id}">${confirming("remove") ? "Tap again to remove it" : `${ICONS.trash}Remove it`}</button>
+      ${official && M.canFixHere(q) ? `<button class="ghost tonal" type="button" data-flagfix="${q.id}">${ICONS.edit}Fix</button>` : ""}
+      <button class="ghost" type="button" data-flagdo="keep" data-q="${q.id}">${confirming("keep") ? "Tap again to keep it as it is" : "Keep as it is"}</button>
+      <button class="ghost quiet danger" type="button" data-flagdo="remove" data-q="${q.id}">${confirming("remove") ? (f.community ? "Tap again to take it out of the community bank" : "Tap again to remove it") : `${ICONS.trash}Remove`}</button>
     </div>
+    ${official ? `<div class="row"><label class="small" for="lvl-${q.id}">Move to</label>
+      <select id="lvl-${q.id}">${[1, 2, 3, 4].map(l => `<option value="${l}" ${l === q.level ? "selected" : ""}>L${l} ${LEVEL_NAMES[l]}</option>`).join("")}</select>
+      <button class="ghost" type="button" data-flaglevel="${q.id}">Change the level</button></div>` : `<p class="small muted">A family's question: you can keep it, or take it out of the community bank. Its family still has it.</p>`}
   </div>`;
+}
+
+/** A family that flagged many questions in a short time, by its code: what it did, never who it is. */
+function flaggerCheckCard(f) {
+  const confirming = d => app.confirm === `${d}:${f.parentId}`;
+  const revealed = app.revealed?.[f.parentId];
+  const asking = app.revealing === f.parentId;
+  return `<div class="qcard">
+    <div class="row" style="justify-content:space-between"><b>${esc(f.code)}</b><span class="small muted">${f.accountAgeDays === null ? "" : `Account ${plural(f.accountAgeDays, "day", "days")} old`}${f.classes.length ? ` · ${f.classes.map(className).map(esc).join(", ")}` : ""}</span></div>
+    <ul class="points small">
+      <li>${plural(f.flagsThisWeek, "flag", "flags")} this week, ${f.flagsTotal} in all; before this, ${f.upheld} upheld and ${f.dismissed} dismissed</li>
+      <li>${f.answered ? `${f.answeredWrong} of ${f.answered} right after their child got the question wrong` : "No flags made right after a child's answer"}${f.averageSeconds === null ? "" : `, ${plural(f.averageSeconds, "second", "seconds")} after answering on average`}</li>
+      <li>${esc(boxLine(f.boxes))}</li>
+    </ul>
+    ${f.notes.length ? `<span class="sublabel">They wrote</span><ul class="problems">${f.notes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    <details><summary>The ${plural(f.questions.length, "question", "questions")}</summary><ul class="small">${f.questions.map(q => `<li>${promptHtml(q.prompt)} <span class="muted">(${esc(topicTitle(q.topicId))})</span></li>`).join("")}</ul></details>
+    <p class="small muted">These questions are hidden only for this family until you decide. Helpful sends each one to review and raises the family's trust; Not helpful dismisses them all and stops this family's flags counting for a while.</p>
+    <div class="row">
+      <button class="ghost tonal" type="button" data-flagger="helpful" data-p="${f.parentId}">${confirming("helpful") ? "Tap again: helpful" : "Helpful"}</button>
+      <button class="ghost" type="button" data-flagger="each" data-p="${f.parentId}">${confirming("each") ? "Tap again to look at each" : "Look at each"}</button>
+      <button class="ghost quiet danger" type="button" data-flagger="not-helpful" data-p="${f.parentId}">${confirming("not-helpful") ? "Tap again: not helpful" : "Not helpful"}</button>
+    </div>
+    ${revealed ? `<p class="small">Email: <b>${esc(revealed)}</b></p>`
+      : asking ? `<label for="revealwhy">Why do you need this family's email? It is recorded.</label>
+        <input id="revealwhy" type="text" maxlength="300" autocomplete="off" aria-describedby="revealerr"><p class="error" id="revealerr" role="alert"></p>
+        <div class="row"><button class="ghost" type="button" id="sendreveal">Show the email</button><button class="ghost quiet" type="button" id="cancelreveal">Cancel</button></div>`
+      : `<div class="row"><button class="ghost quiet" type="button" data-reveal="${f.parentId}">Show the family's email…</button></div>`}
+  </div>`;
+}
+
+/** The questions made from the same template as a fixed or removed one, checked again, to send to review. */
+function siblingsPanel() {
+  const sib = app.siblings;
+  const failed = sib.list.filter(x => !x.report.passed).length;
+  return `<div class="panel">
+    <span class="label">Questions from the same template</span>
+    <p class="small">${plural(sib.list.length, "more question comes", "more questions come")} from the same template as the one you ${sib.action}, so ${sib.list.length === 1 ? "it" : "they"} may share its mistake. Nitya's checks ran again: ${failed ? `${failed} failed` : "all passed"}.</p>
+    <details><summary>See them</summary><ul class="small">${sib.list.map(x => `<li>${x.report.passed ? "" : "✗ "}${promptHtml(x.question.prompt)} <span class="muted">(${esc(x.question.answers.join(", "))})</span></li>`).join("")}</ul></details>
+    <div class="row">
+      ${failed ? `<button class="ghost tonal" type="button" data-sibsend="failed">Send the ${failed} that failed to review</button>` : ""}
+      <button class="ghost" type="button" data-sibsend="all">Send all ${sib.list.length} to review</button>
+      <button class="ghost quiet" type="button" id="sibleave">Leave them</button></div>
+  </div>`;
+}
+
+/** After a fix or a removal: the question's template siblings, checked again, or null when it has none. */
+async function siblingsOf(q, action) {
+  if (!M.templateKey(q)) return null;
+  const list = await backend.templateSiblings(q.id);
+  const topics = M.ALL_CONTENT.map(M.topicInfo);
+  return list.length ? { action, list: list.map(question => ({ question, report: M.recheck(question, topics) })) } : null;
+}
+
+function flagSettingsForm(fs) {
+  return `<details class="panel"><summary class="label">Flag settings</summary>
+    <p class="small muted">The numbers the flag rules use. They are starting values: change them as you learn what works.</p>
+    <div class="nums">${Object.entries(M.FLAG_SETTING_LIMITS).map(([k, l]) => `<label>${esc(l.label)}
+      <input type="number" id="fs-${k}" value="${fs[k]}" min="${l.min}" max="${l.max}" step="${l.whole ? 1 : 0.05}" ${l.whole ? 'inputmode="numeric"' : 'inputmode="decimal"'}></label>`).join("")}</div>
+    <div class="row"><button class="ghost tonal" type="button" id="saveflagsettings">Save the flag settings</button></div>
+  </details>`;
 }
 
 function renderAdmin() {
@@ -1553,10 +1686,15 @@ function renderAdmin() {
     body = app.queue.length
       ? `<p class="muted">${app.queue.length} ${app.queue.length === 1 ? "question failed" : "questions failed"} a check. Children never see a question until it is approved.</p>${app.queue.map(reviewCard).join("")}`
       : `<p class="muted">Nothing to review. Questions that fail a check wait here.</p>`;
-  } else if (app.tab === "community") {
-    body = app.reports.length
-      ? `<p class="muted">${plural(app.reports.length, "community question was", "community questions were")} reported by a family. ${app.reports.length === 1 ? "It is" : "They are"} hidden from every family until you keep or remove ${app.reports.length === 1 ? "it" : "them"}. Removing takes it out of the community bank; the family who wrote it still has it.</p>${app.reports.map(communityCard).join("")}`
-      : `<p class="muted">No reports. When a family reports a community question, it is hidden from everyone and waits here.</p>`;
+  } else if (app.tab === "flags") {
+    body = `${app.siblings ? siblingsPanel() : ""}
+      ${app.flaggers.length ? `<h2>Flagger checks · ${app.flaggers.length}</h2>
+        <p class="muted">A family flagged many questions in a short time. Judge the flags together.</p>${app.flaggers.map(flaggerCheckCard).join("")}` : ""}
+      <h2>Flagged questions${app.flagged.length ? ` · ${app.flagged.length}` : ""}</h2>
+      ${app.flagged.length
+        ? `<p class="muted">Enough families flagged these, or a flag said one may not be right for a child. Child safety and possibly wrong answers come first.</p>${app.flagged.map(flaggedCard).join("")}`
+        : `<p class="muted">Nothing flagged. A question comes here when ${app.flagSettings.reviewFamilies} families flag it (${app.flagSettings.communityFamilies} for a community question), at once when someone says it is not right for a child, and when children's answers count as one more family.</p>`}
+      ${flagSettingsForm(app.flagSettings)}`;
   } else if (app.tab === "classes") {
     const cell = (c, f, label) => `<input type="number" inputmode="numeric" data-class="${c.classId}" data-f="${f}" value="${c[f]}" aria-label="${esc(className(c.classId))}: ${label}">`;
     body = `<p class="muted">Each class's default pass mark, as a percentage of the 68 marks a quiz can give, and the marks off for a wrong first try. Every topic in the class uses them, for every child whose parent hasn't chosen their own in Quiz settings.</p>
@@ -1603,15 +1741,7 @@ function renderAdmin() {
       toTop();
     });
   });
-  screen.querySelectorAll("[data-moderate]").forEach(b => b.onclick = () => {
-    const key = `${b.dataset.moderate}:${b.dataset.q}`;
-    if (app.confirm !== key) { app.confirm = key; render(); return; }
-    step(async () => {
-      await backend.moderateQuestion(b.dataset.q, b.dataset.moderate);
-      await openAdmin("community", { note: b.dataset.moderate === "keep" ? "Kept. It is back in the community bank." : "Removed from the community bank. Its family still has it." });
-      toTop();
-    });
-  });
+  if (app.tab === "flags") wireFlagsTab();
   screen.querySelectorAll("[data-fixq]").forEach(b => b.onclick = () => {
     const entry = app.queue.find(e => e.question.id === b.dataset.fixq);
     show({ mode: "fix", entry, edits: M.editsOf(entry.question), report: entry.report, candidate: null, manyAnswers: null, needAnswer: false });
@@ -1651,6 +1781,75 @@ function renderAdmin() {
     await openAdmin("newq", { newqNote: note });
     toTop();
   });
+}
+
+function wireFlagsTab() {
+  const flagged = id => app.flagged.find(f => f.question.id === id);
+  const decided = async (q, decision, note) => {
+    await backend.decideFlags(q.id, decision);
+    const siblings = decision.kind === "remove" && !flagged(q.id)?.community ? await siblingsOf(q, "removed") : null;
+    await openAdmin("flags", { note, siblings });
+    toTop();
+  };
+  screen.querySelectorAll("[data-flagdo]").forEach(b => b.onclick = () => {
+    const key = `${b.dataset.flagdo}:${b.dataset.q}`;
+    if (app.confirm !== key) { app.confirm = key; render(); return; }
+    const f = flagged(b.dataset.q);
+    step(() => decided(f.question, { kind: b.dataset.flagdo }, b.dataset.flagdo === "keep"
+      ? "Kept as it is. It is back in every child's quizzes, and the families who flagged it are told."
+      : f.community ? "Taken out of the community bank. Its family still has it." : "Removed. Children won't get it again."));
+  });
+  screen.querySelectorAll("[data-flaglevel]").forEach(b => b.onclick = () => {
+    const f = flagged(b.dataset.flaglevel);
+    const level = Number(document.getElementById(`lvl-${f.question.id}`).value);
+    if (level === f.question.level) { app.error = "Pick another level, or keep it as it is."; app.note = null; render(); return; }
+    step(() => decided(f.question, { kind: "level", level }, `Moved to L${level} ${LEVEL_NAMES[level]}. Its live results start again.`));
+  });
+  screen.querySelectorAll("[data-flagfix]").forEach(b => b.onclick = () => {
+    const q = flagged(b.dataset.flagfix).question;
+    show({ mode: "fix", flagFix: true, entry: { question: q, report: null, checkedAt: null }, edits: M.editsOf(q),
+      report: M.recheck(q, M.ALL_CONTENT.map(M.topicInfo)), candidate: null, manyAnswers: null, needAnswer: false });
+  });
+  screen.querySelectorAll("[data-flagger]").forEach(b => b.onclick = () => {
+    const key = `${b.dataset.flagger}:${b.dataset.p}`;
+    if (app.confirm !== key) { app.confirm = key; render(); return; }
+    step(async () => {
+      await backend.decideFlagger(b.dataset.p, b.dataset.flagger);
+      await openAdmin("flags", { note: b.dataset.flagger === "not-helpful"
+        ? "Not helpful. The flags are dismissed, and this family's flags won't count for a while."
+        : "Each question is in Flagged questions now." });
+      toTop();
+    });
+  });
+  screen.querySelectorAll("[data-reveal]").forEach(b => b.onclick = () => { app.revealing = b.dataset.reveal; render(); document.getElementById("revealwhy")?.focus(); });
+  const sendReveal = document.getElementById("sendreveal");
+  if (sendReveal) sendReveal.onclick = () => {
+    const why = document.getElementById("revealwhy").value.trim();
+    if (why.length < 10) return needWord(document.getElementById("revealwhy"), "revealerr", "Say in a sentence why you need this family's email.");
+    step(async () => {
+      const email = await backend.revealFlagger(app.revealing, why);
+      app.revealed = { ...app.revealed, [app.revealing]: email ?? "No email on record" };
+      app.revealing = null;
+      render();
+    });
+  };
+  const cancelReveal = document.getElementById("cancelreveal");
+  if (cancelReveal) cancelReveal.onclick = () => { app.revealing = null; render(); };
+  screen.querySelectorAll("[data-sibsend]").forEach(b => b.onclick = () => step(async () => {
+    const list = app.siblings.list.filter(x => b.dataset.sibsend === "all" || !x.report.passed);
+    await backend.sendToReview(list.map(x => ({ questionId: x.question.id, report: x.report })));
+    await openAdmin("flags", { note: `Sent ${plural(list.length, "question", "questions")} to the review queue. Children don't get ${list.length === 1 ? "it" : "them"} until you approve.` });
+    toTop();
+  }));
+  const leave = document.getElementById("sibleave");
+  if (leave) leave.onclick = () => { app.siblings = null; render(); };
+  const saveFs = document.getElementById("saveflagsettings");
+  if (saveFs) saveFs.onclick = () => {
+    const fs = Object.fromEntries(Object.keys(M.FLAG_SETTING_LIMITS).map(k => [k, Number(document.getElementById(`fs-${k}`).value)]));
+    const problems = M.flagSettingsProblems(fs);
+    if (problems.length) { app.error = problems.join(" "); app.note = null; render(); return; }
+    step(async () => { await backend.saveFlagSettings(fs); await openAdmin("flags", { note: "The flag settings are saved." }); });
+  };
 }
 
 /**
@@ -1752,11 +1951,16 @@ function renderFix() {
     if (!app.candidate) { runCheck(); return; }
     if (!app.report.passed && !app.confirmSave) { app.confirmSave = true; render(); return; }
     step(async () => {
+      if (app.flagFix) {
+        await backend.decideFlags(q.id, { kind: "fix", question: app.candidate, report: app.report });
+        const siblings = await siblingsOf(q, "fixed");
+        return openAdmin("flags", { note: "Fixed. Children get the new version from their next quiz, and the families who flagged it are told.", siblings });
+      }
       await backend.reviewQuestion(q.id, { decision: "fixed", question: app.candidate, report: app.report });
       await openAdmin("queue", { note: "Fixed and approved. Children can get it in their next quiz." });
     });
   };
-  document.getElementById("cancel").onclick = () => openAdmin("queue");
+  document.getElementById("cancel").onclick = () => openAdmin(app.flagFix ? "flags" : "queue");
 }
 
 /* ---------- topics and quizzes ---------- */
@@ -1845,6 +2049,8 @@ function nextQ() {
   app.tries = [];
   app.picked = null;
   app.counted = [];
+  app.flagging = false;
+  app.flagNote = null;
   keepQuiz();
   render();
 }
@@ -1860,7 +2066,10 @@ function saveResponse(q) {
     firstTryCorrect: r.firstTryCorrect, retryCorrect: r.retryCorrect, marksDelta: r.marksDelta,
   };
   data.responses.push(row);
-  persist(() => backend.recordResponse(row));
+  // The choice picked first goes into the question's live results, and is never read back.
+  const firstAnswer = r.firstTryCorrect ? app.picked : app.tries?.[0] ?? null;
+  app.answeredAt = Date.now();
+  persist(() => backend.recordResponse({ ...row, firstAnswer }));
 }
 
 function quizDone() {
@@ -2274,7 +2483,10 @@ function renderQuiz() {
     ${optionButtons(q.options, "data-opt", { disabled: locked, tried: app.tries ?? [], right: locked ? q.answers : null, picked: app.picked })}
     ${locked ? "" : keyHint(q.options.length)}
     <div id="fb">${app.feedback ?? ""}</div>
-    ${locked ? `<div class="row"><button class="btn primary wide" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button></div>` : ""}`;
+    ${locked ? `<div class="row"><button class="btn primary wide" type="button" id="cont">${quizDone() ? (practice ? "Finish practice" : "See my result") : "Next question"}</button></div>
+      ${app.flagNote ? `<p class="note small" role="status">${esc(app.flagNote)}</p>`
+        : app.flagging ? flagForm({ note: false, title: "What's wrong with this question?" })
+        : `<div class="row wrongrow"><button class="ghost quiet small" type="button" id="wrongq">Something's wrong?</button></div>`}` : ""}`;
   // The first question after the flag starts with the news, once, so a pre-reader knows the goal is now the stars.
   const flagNews = play && !practice && app.phase === "ask" && s.marks >= s.passMarks && !app.flagSaid;
   if (flagNews) app.flagSaid = true;
@@ -2298,6 +2510,89 @@ function renderQuiz() {
   const cont = document.getElementById("cont");
   if (cont) cont.onclick = () => (quizDone() ? finish() : nextQ());
   screen.querySelectorAll("[data-opt]:not([disabled])").forEach(b => b.onclick = () => answer(b.dataset.opt));
+  wireQuizFlag(q);
+}
+
+/**
+ * "Something's wrong?" after an answer. A child in LKG to Class 5 only taps it: the question waits for a parent
+ * under Check questions, and this child doesn't get it meanwhile. From Class 6 the child ticks what is wrong.
+ */
+function wireQuizFlag(q) {
+  const r = app.state.responses[app.state.responses.length - 1];
+  const answeredWrong = r ? !r.firstTryCorrect : null;
+  const done = text => {
+    app.flagging = false;
+    app.flagNote = text;
+    banks[app.topicId] = (banks[app.topicId] ?? []).filter(x => x.id !== q.id);
+    keepQuiz();
+    render();
+    document.getElementById("cont")?.focus();
+  };
+  const wrong = document.getElementById("wrongq");
+  if (wrong) wrong.onclick = () => {
+    if (!M.childFlagsDirectly(child.classId)) {
+      persist(() => backend.suggestFlag(child.id, q.id, answeredWrong));
+      return done("Thank you! A grown-up will look at it.");
+    }
+    app.flagging = true;
+    app.flagDraft = { boxes: [], levelDirection: null, note: "" };
+    render();
+    screen.querySelector("[data-flagbox]")?.focus();
+  };
+  wireFlagForm(async request => {
+    await backend.flagQuestion({
+      ...request, questionId: q.id, profileId: child.id, answeredWrong,
+      secondsAfterAnswer: app.answeredAt ? Math.round((Date.now() - app.answeredAt) / 1000) : null,
+    });
+    done("Thank you! You won't get this question while Nitya checks it.");
+  }, () => { app.flagging = false; render(); document.getElementById("wrongq")?.focus(); });
+}
+
+/** The flag boxes, a direction for Wrong level, and for a grown-up a note. The draft lives in app.flagDraft. */
+function flagForm({ note = true, title = "What's wrong with it?" } = {}) {
+  const d = app.flagDraft ?? { boxes: [], levelDirection: null, note: "" };
+  return `<fieldset class="flagform" aria-describedby="flagerr"><legend>${esc(title)}</legend>
+    ${M.FLAG_BOXES.map(b => `<label class="check"><input type="checkbox" data-flagbox="${b}" ${d.boxes.includes(b) ? "checked" : ""}>
+      <span>${esc(M.FLAG_BOX_TEXT[b].label)}<small class="block-sub">${esc(M.FLAG_BOX_TEXT[b].help)}</small></span></label>`).join("")}
+    <div class="row flagdir" role="radiogroup" aria-label="Too easy or too hard" ${d.boxes.includes("level") ? "" : "hidden"}>
+      ${[["easy", "Too easy"], ["hard", "Too hard"]].map(([v, t]) => `<label class="pick"><input type="radio" name="flagdir" value="${v}" ${d.levelDirection === v ? "checked" : ""}><span>${t}</span></label>`).join("")}</div>
+    ${note ? `<label for="flagnote">Anything to add? <span class="muted small">Optional</span></label>
+      <textarea id="flagnote" rows="2" maxlength="${M.NOTE_MAX}">${esc(d.note ?? "")}</textarea>` : ""}
+    <p class="error" id="flagerr" role="alert"></p>
+    <div class="row"><button class="btn primary" type="button" id="sendflag">Send</button><button class="ghost quiet" type="button" id="cancelflag">Cancel</button></div>
+  </fieldset>`;
+}
+
+/** Wires the flag form showing, if any: `send` gets the cleaned request and may throw a sentence to show. */
+function wireFlagForm(send, cancel) {
+  const form = screen.querySelector(".flagform");
+  if (!form) return;
+  const read = () => ({
+    boxes: [...form.querySelectorAll("[data-flagbox]:checked")].map(i => i.dataset.flagbox),
+    levelDirection: form.querySelector("[name=flagdir]:checked")?.value ?? null,
+    note: form.querySelector("#flagnote")?.value ?? "",
+  });
+  const err = form.querySelector("#flagerr");
+  form.addEventListener("change", () => {
+    err.textContent = "";
+    app.flagDraft = read();
+    form.querySelector(".flagdir").hidden = !app.flagDraft.boxes.includes("level");
+  });
+  form.querySelector("#flagnote")?.addEventListener("input", () => { app.flagDraft = read(); });
+  form.querySelector("#sendflag").onclick = async () => {
+    const draft = read();
+    const clean = M.cleanFlag({ questionId: "", ...draft });
+    if (typeof clean === "string") {
+      err.textContent = clean;
+      (clean.includes("easy") ? form.querySelector("[name=flagdir]") : form.querySelector("[data-flagbox]"))?.focus();
+      return;
+    }
+    const btn = form.querySelector("#sendflag");
+    btn.disabled = true;
+    try { await send(clean); }
+    catch (e) { err.textContent = e.message; btn.disabled = false; }
+  };
+  form.querySelector("#cancelflag").onclick = cancel;
 }
 
 function answer(choice) {
@@ -2518,7 +2813,7 @@ const SCREENS = {
   profiles: renderProfiles, onboard: renderOnboard, "placement-offer": renderPlacementOffer, placement: renderPlacement,
   "placement-done": renderPlacementDone, "placement-result": renderPlacementResult, grownups: renderGrownups, "child-settings": renderChildSettings,
   admin: renderAdmin, fix: renderFix, "child-progress": renderChildProgress, "delete-account": renderDeleteAccount,
-  "own-questions": renderOwnQuestions, "own-fix": renderOwnFix,
+  "own-questions": renderOwnQuestions, "own-fix": renderOwnFix, "check-questions": renderCheckQuestions,
   dash: renderDash, lesson: renderLesson, quiz: renderQuiz, result: renderResult, "practice-done": renderPracticeDone,
 };
 
@@ -2604,8 +2899,8 @@ function goBack() {
   if (m === "lesson") { app.peek ? backToQuiz() : goDash(); return true; }
   if (["result", "practice-done"].includes(m)) { goDash(); return true; }
   if (m === "pin" && app.cancel) { app.cancel(); return true; }
-  if (["child-settings", "child-progress", "admin", "delete-account"].includes(m)) { m === "delete-account" ? show(app.back) : show({ mode: "grownups" }); return true; }
-  if (m === "fix") { openAdmin("queue"); return true; }
+  if (["child-settings", "child-progress", "admin", "delete-account", "own-questions", "check-questions"].includes(m)) { m === "delete-account" ? show(app.back) : show({ mode: "grownups" }); return true; }
+  if (m === "fix") { openAdmin(app.flagFix ? "flags" : "queue"); return true; }
   if (m === "notice" || m === "forgot-pin") { show(app.back && app.back.mode !== m ? app.back : { mode: "signin" }); return true; }
   if (m === "email-sent") { document.getElementById("back")?.click(); return true; }
   if (m === "onboard") { const b = document.getElementById("obback"); if (b && !b.hidden) { b.click(); return true; } return false; }

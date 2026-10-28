@@ -30,7 +30,7 @@ const signedInAs = (id: string, email: string): AuthPort => {
 
 async function newParent() {
   const id = randomUUID();
-  await db.query("insert into auth.users (id) values ($1)", [id]);
+  await db.query("insert into auth.users (id, email) values ($1, $2)", [id, `${id}@example.com`]);
   return id;
 }
 
@@ -81,6 +81,13 @@ async function resetWorld() {
   await db.query("delete from public.question_uploads");
   await new PgQuestionStore(db).save(checkQuestions(DEMO_REVIEW_SAMPLES, ALL_CONTENT.map(topicInfo)));
   await db.query("update public.class_settings set pass_percent = 65, wrong_penalty = 1");
+  await db.query("delete from public.question_flags");
+  await db.query("delete from public.flag_suggestions");
+  await db.query("delete from public.family_trust");
+  await db.query("delete from public.question_choice_picks");
+  await db.query("update public.questions set flag_review_at = null, flag_hide_all = false where flag_review_at is not null");
+  await db.query("delete from public.flag_settings");
+  await db.query("insert into public.flag_settings default values");
   await db.query("begin");
   await db.query(`update public.level_bands set min_rate = case level when 1 then 0.85 when 2 then 0.65 when 3 then 0.5 else 0 end,
     max_rate = case level when 1 then 1 when 2 then 0.85 when 3 then 0.65 else 0.5 end`);
@@ -95,6 +102,15 @@ accountContract("the Supabase backend", async () => {
       const id = await newParent();
       await db.query("insert into public.admins (user_id) values ($1)", [id]);
       return backendFor(id);
+    },
+    // The database's clock can't move, so everything the flag rules time moves back instead.
+    async travel(days) {
+      const back = [days * 86400];
+      await db.query("update public.question_flags set flagged_at = flagged_at - make_interval(secs => $1), hide_until = hide_until - make_interval(secs => $1), resolved_at = resolved_at - make_interval(secs => $1)", back);
+      await db.query("update public.flag_suggestions set suggested_at = suggested_at - make_interval(secs => $1)", back);
+      await db.query("update public.family_trust set muted_until = muted_until - make_interval(secs => $1)", back);
+      await db.query("update public.questions set flag_review_at = flag_review_at - make_interval(secs => $1) where flag_review_at is not null", back);
+      await db.query("update public.parents set created_at = created_at - make_interval(secs => $1)", back);
     },
   };
 });
@@ -267,5 +283,72 @@ describe("a family's own questions on Supabase", () => {
     expect(rows).toEqual([{ id: f.questionId, owner: null, upload_id: null, shared: true }]);
     expect((await other.profileData(kid.id)).responses).toHaveLength(1);
     expect((await other.questions("ukg-addition-10", { community: true })).some(q => q.id === f.questionId)).toBe(true);
+  });
+});
+
+describe("question flags on Supabase", () => {
+  const TAKING = UKG_TOPICS.find(t => t.topic.id === "ukg-subtraction-10")!;
+  const q = (n: number) => TAKING.bank[n].id;
+  const family = async () => {
+    const id = await newParent();
+    const b = backendFor(id);
+    await b.giveConsent("2026-10-25");
+    return { id, b };
+  };
+  const admin = async () => {
+    const id = await newParent();
+    await db.query("insert into public.admins (user_id) values ($1)", [id]);
+    return { id, b: backendFor(id) };
+  };
+
+  it("lets families change flags only through the flag functions, and read only their own", async () => {
+    const [a, other] = [await family(), await family()];
+    await a.b.flagQuestion({ questionId: q(60), boxes: ["question"] });
+    await expect(as(db, a.id, d => d.query(
+      "insert into public.question_flags (question_id, kind, parent_id, boxes) values ($1, 'family', $2, '{safety}')", [q(61), a.id])))
+      .rejects.toThrow(/row-level security|permission denied/);
+    await expect(as(db, a.id, d => d.query("update public.question_flags set weight = 2 where parent_id = $1", [a.id])))
+      .rejects.toThrow("permission denied");
+    await expect(as(db, a.id, d => d.query("insert into public.family_trust (parent_id, upheld) values ($1, 100)", [a.id])))
+      .rejects.toThrow("permission denied");
+    await expect(as(db, a.id, d => d.query("update public.questions set flag_review_at = now() where id = $1", [q(60)])))
+      .rejects.toThrow("permission denied");
+    await expect(as(db, a.id, d => d.query("select public.flag_evaluate($1)", [q(60)]))).rejects.toThrow("permission denied");
+    await expect(as(db, a.id, d => d.query("select public.flag_system($1, 'safety', null, 'x')", [q(60)]))).rejects.toThrow("permission denied");
+    expect((await as(db, other.id, d => d.query("select id from public.question_flags where question_id = $1", [q(60)]))).rowCount).toBe(0);
+    expect((await as(db, a.id, d => d.query("select id from public.question_flags where question_id = $1", [q(60)]))).rowCount).toBe(1);
+    await expect(as(db, a.id, d => d.query("select * from public.flag_settings"))).resolves.toMatchObject({ rowCount: 0 });
+    await expect(as(db, a.id, d => d.query("select public.flagger_cards()"))).rejects.toThrow("Only an admin");
+  });
+
+  it("keeps a question hidden for everyone out of reach of every family but an admin, even read directly", async () => {
+    const [a, other] = [await family(), await family()];
+    const { id: adminId } = await admin();
+    expect(await a.b.flagQuestion({ questionId: q(62), boxes: ["safety"] })).toBe("review");
+    const read = (userId: string) => as(db, userId, d => d.query("select id from public.questions where id = $1", [q(62)])).then(r => r.rowCount);
+    expect(await read(other.id)).toBe(0);
+    expect(await read(adminId)).toBe(1);
+  });
+
+  it("keeps the admin's numbers in range even past the app, and records why a flagger's email was looked up", async () => {
+    const [a, ad] = [await family(), await admin()];
+    await expect(as(db, ad.id, d => d.query("update public.flag_settings set burst_flags = 2"))).rejects.toThrow("flag_settings_burst_flags_check");
+    await expect(as(db, a.id, d => d.query("update public.flag_settings set burst_flags = 20"))).resolves.toMatchObject({ rowCount: 0 });
+    expect(await ad.b.revealFlagger(a.id, "Checking a burst of flags on one topic")).toBe(`${a.id}@example.com`);
+    expect((await db.query("select parent_id, reason, revealed_by from public.flagger_reveals where parent_id = $1", [a.id])).rows)
+      .toEqual([{ parent_id: a.id, reason: "Checking a burst of flags on one topic", revealed_by: ad.id }]);
+    expect((await as(db, a.id, d => d.query("select id from public.flagger_reveals"))).rowCount).toBe(0);
+  });
+
+  it("forgets a leaving family but keeps its flags, and drops a deleted child's taps", async () => {
+    const a = await family();
+    const riya = await a.b.createProfile({ nickname: "Riya", avatar: "owl", classId: "UKG", board: "CBSE", language: "en" });
+    await a.b.suggestFlag(riya.id, q(63), true);
+    await a.b.flagQuestion({ questionId: q(64), profileId: riya.id, boxes: ["level"], levelDirection: "easy" });
+    await a.b.deleteProfile(riya.id);
+    expect((await db.query("select count(*)::int n from public.flag_suggestions where parent_id = $1", [a.id])).rows[0].n).toBe(0);
+    expect((await db.query("select profile_id from public.question_flags where question_id = $1", [q(64)])).rows).toEqual([{ profile_id: null }]);
+    await a.b.deleteAccount();
+    expect((await db.query("select parent_id, kind from public.question_flags where question_id = $1", [q(64)])).rows).toEqual([{ parent_id: null, kind: "family" }]);
   });
 });

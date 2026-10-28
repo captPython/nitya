@@ -1,10 +1,11 @@
 import type { Review, ReviewEntry } from "../admin/review";
+import type { FlagBox, FlaggerCard, FlagOutcome, FlagRequest, FlagSettings, FlagSummary, QuestionStats } from "../flags/rules";
 import type { BandCuts, ChildSettings, ClassSettings } from "../admin/settings";
 import type { OwnQuestion, UploadResult } from "../supply/family";
 import type { OwnVerdict, UploadRow } from "../supply/template";
 import type { SuppliedQuestion } from "../supply/types";
-import type { Question } from "../types";
-import type { LevelBand } from "../validation";
+import type { Level, Question } from "../types";
+import type { CheckReport, LevelBand } from "../validation";
 import type { Profile, ProfileDetails } from "./options";
 import type { AttemptRow, ProfileData, ResponseRow, TopicProgressRow } from "./progress";
 
@@ -65,18 +66,65 @@ export type OwnReview =
   | { decision: "approve" | "delete" }
   | { decision: "fix"; question: SuppliedQuestion };
 
-/** A community question that a family reported, for the admin. */
-export interface CommunityReport {
-  question: SuppliedQuestion;
-  reasons: string[];
-  firstReportedAt: string;
-}
-
 /** Which questions a quiz draws from. */
 export interface QuestionPool {
   /** Other families' shared questions too: the child's community bank switch. */
   community?: boolean;
+  /** The child playing: questions they tapped "Something's wrong?" on are left out too. */
+  profileId?: string;
 }
+
+/** A child's "Something's wrong?" tap, for a parent to check. */
+export interface FlagCheck {
+  profileId: string;
+  question: Question;
+  answeredWrong: boolean | null;
+  suggestedAt: string;
+}
+
+/** One of the family's flags, and where it stands. */
+export interface MyFlag {
+  question: Question;
+  boxes: FlagBox[];
+  flaggedAt: string;
+  /**
+   * "watching": hidden for the family until `until`. "back": the watch ended
+   * quietly. "review": waiting for Nitya's team. "upheld" / "dismissed": decided.
+   */
+  state: "watching" | "back" | "review" | "upheld" | "dismissed";
+  until: string | null;
+}
+
+/** A flagged question waiting for the admin. */
+export interface FlaggedQuestion extends FlagSummary {
+  question: SuppliedQuestion;
+  /** Another family's shared question: the admin can keep it or take it out of the community bank. */
+  community: boolean;
+  /** Hidden for every child until the admin decides. */
+  hiddenForAll: boolean;
+  reviewSince: string;
+  /** The flagging families, by code, with their trust. */
+  flaggers: { code: string; trust: number }[];
+  stats: QuestionStats;
+  /** Nitya's answer check on the question as it is. */
+  answerCheck: "agrees" | "disagrees" | "unchecked";
+}
+
+/** A family that flagged many questions in a short time, for the admin to judge as a whole. */
+export interface FlaggerCheck extends FlaggerCard {
+  questions: SuppliedQuestion[];
+}
+
+/**
+ * The admin's decision on a flagged question. Keep dismisses the flags; the
+ * others uphold them. Only Nitya's own questions can be fixed or moved to
+ * another level: a community question is kept or taken out of the bank.
+ */
+export type FlagDecision =
+  | { kind: "keep" }
+  | { kind: "level"; level: Level }
+  | { kind: "fix"; question: SuppliedQuestion; report: CheckReport }
+  | { kind: "remove" };
 
 /**
  * Where a family's account lives. The app uses the Supabase backend when it
@@ -138,13 +186,31 @@ export interface AccountBackend {
   reviewOwnQuestion(questionId: string, review: OwnReview): Promise<OwnVerdict | null>;
   /** Takes an upload's questions away. Ones a child has played stay out of sight, so the child's answers keep them. */
   removeUpload(uploadId: string): Promise<void>;
-  /** Reports another family's question: it leaves the community bank until an admin looks at it. */
-  reportQuestion(questionId: string, reason: string): Promise<void>;
+
+  // Question flags (see src/flags/rules.ts).
+  /** A family's flag. The question is hidden for the family at once; a family's own upload goes to its own Review instead. */
+  flagQuestion(request: FlagRequest): Promise<FlagOutcome>;
+  /** A young child's "Something's wrong?": hidden for that child until a parent checks it. */
+  suggestFlag(profileId: string, questionId: string, answeredWrong: boolean | null): Promise<void>;
+  flagChecks(): Promise<FlagCheck[]>;
+  /** The parent found nothing wrong: the child gets the question again. */
+  dismissFlagCheck(profileId: string, questionId: string): Promise<void>;
+  /** The family's flags, newest first, with those decided in the last 30 days. */
+  myFlags(): Promise<MyFlag[]>;
 
   // The admin panel. Each of these refuses anyone who isn't an admin (levelBands is for everyone).
-  communityReports(): Promise<CommunityReport[]>;
-  /** Keep puts a reported question back in the community bank; remove takes it out for good (its family keeps it). */
-  moderateQuestion(questionId: string, decision: "keep" | "remove"): Promise<void>;
+  flagQueue(): Promise<FlaggedQuestion[]>;
+  flaggerChecks(): Promise<FlaggerCheck[]>;
+  decideFlags(questionId: string, decision: FlagDecision): Promise<void>;
+  decideFlagger(parentId: string, decision: "helpful" | "not-helpful" | "each"): Promise<void>;
+  flagSettings(): Promise<FlagSettings>;
+  saveFlagSettings(settings: FlagSettings): Promise<void>;
+  /** The flagging family's email, for a reason that is recorded. */
+  revealFlagger(parentId: string, reason: string): Promise<string | null>;
+  /** Nitya's approved questions from the same template as this one (see templateKey). */
+  templateSiblings(questionId: string): Promise<SuppliedQuestion[]>;
+  /** Puts approved questions in the review queue, each with its check run, out of children's quizzes until reviewed. */
+  sendToReview(entries: { questionId: string; report: CheckReport }[]): Promise<void>;
   reviewQueue(): Promise<ReviewEntry[]>;
   reviewQuestion(questionId: string, review: Review): Promise<void>;
   saveClassSettings(settings: ClassSettings): Promise<void>;
