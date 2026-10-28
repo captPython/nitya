@@ -9,6 +9,7 @@ import type { ProfileDetails } from "../src/accounts/options";
 import type { Look } from "../src/looks";
 import { topicInfo } from "../src/supply";
 import { checkUpload, parseTemplate, templateTopic, TEMPLATE_COLUMNS, type UploadRow } from "../src/supply/template";
+import { DEFAULT_FLAG_SETTINGS, type FlagRequest } from "../src/flags/rules";
 import { CLASS_ORDER } from "../src/types";
 import { DEFAULT_BANDS } from "../src/validation";
 
@@ -28,6 +29,8 @@ export interface ContractWorld {
   family(): Promise<AccountBackend>;
   /** A signed-in admin. */
   admin(): Promise<AccountBackend>;
+  /** Moves this Nitya's clock forward, for the flag rules' weeks and days. */
+  travel(days: number): Promise<void>;
 }
 
 const V = "2026-10-25";
@@ -45,6 +48,9 @@ const GOOD = row("Mia has 2 apples and gets 3 more. How many apples now?", ["4",
 const NO_SUM = row("Ravi has 4 kites and gets 1 more. How many kites now?", ["4", "5", "6"], "5");
 const WRONG_SUM = row("Asha has 3 pens and gets 3 more. How many pens now?", ["5", "6", "7"], "7", "3 + 3");
 const promptOf = (line: string[]) => line[3];
+/** The flag tests' questions, each test with its own: on a shared database, one test's decisions mustn't reach another's. */
+const TAKING = UKG_TOPICS.find(t => t.topic.id === "ukg-subtraction-10")!;
+const SUB = (n: number) => TAKING.bank[n].id;
 const sampleIds = (ids: string[]) => ids.filter(id => id.startsWith("demo-")).sort();
 
 /**
@@ -389,35 +395,53 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       expect(await b.ownQuestions()).toEqual([]);
     });
 
-    it("hides a reported community question until an admin keeps it, or takes it out of the community bank", async () => {
+    it("takes a community question out of quizzes once two families flag it, until an admin keeps it or takes it out", async () => {
+      const w = await newWorld();
+      const owner = await w.family();
+      await owner.giveConsent(V);
+      const [f1, f2, f3] = [await w.family(), await w.family(), await w.family()];
+      const admin = await w.admin();
+      await owner.saveUpload({ fileName: "mine.xlsx", private: false, rows: upload(GOOD) });
+      const [shared] = await served(f1, true);
+      expect(await f1.flagQuestion({ questionId: shared.id, boxes: ["question"], note: "The apples are too hard" })).toBe("watching");
+      expect(await served(f1, true)).toEqual([]);
+      expect((await served(f3, true)).length).toBe(1);
+      // A second family is enough for a community question, which only Nitya's checker has looked at.
+      expect(await f2.flagQuestion({ questionId: shared.id, boxes: ["question"] })).toBe("review");
+      expect(await served(f3, true)).toEqual([]);
+      expect((await served(owner)).length).toBe(1);
+      expect(await admin.flagQueue()).toEqual([expect.objectContaining({
+        question: expect.objectContaining({ id: shared.id }), community: true, hiddenForAll: true, boxes: { question: 2 }, notes: ["The apples are too hard"],
+      })]);
+      await expect(admin.decideFlags(shared.id, { kind: "level", level: 2 })).rejects.toThrow("can only be kept or taken out");
+
+      await admin.decideFlags(shared.id, { kind: "keep" });
+      expect((await served(f1, true)).length).toBe(1);
+      expect(await admin.flagQueue()).toEqual([]);
+
+      // One flag per family for each version of a question: Keep leaves it as it was.
+      await expect(f1.flagQuestion({ questionId: shared.id, boxes: ["safety"] })).rejects.toThrow("kept it as it is");
+      expect(await f3.flagQuestion({ questionId: shared.id, boxes: ["safety"] })).toBe("review");
+      await admin.decideFlags(shared.id, { kind: "remove" });
+      expect(await served(f3, true)).toEqual([]);
+      expect((await served(owner)).length).toBe(1);
+      expect((await owner.ownQuestions())[0].shared).toBe(false);
+      await expect(admin.decideFlags(shared.id, { kind: "keep" })).rejects.toThrow("isn't waiting for review");
+    });
+
+    it("sends a family's own question to its own Review when the family flags it", async () => {
       const w = await newWorld();
       const b = await w.family();
       await b.giveConsent(V);
-      const other = await w.family();
-      await other.giveConsent(V);
-      const admin = await w.admin();
       await b.saveUpload({ fileName: "mine.xlsx", private: false, rows: upload(GOOD) });
-      const [shared] = await served(other, true);
-      await expect(b.reportQuestion(shared.id, "Mine")).rejects.toThrow("isn't in the community bank");
-      await expect(other.reportQuestion(shared.id, " ")).rejects.toThrow("a few words");
-      await other.reportQuestion(shared.id, "The apples are too hard for my child");
-      expect(await served(other, true)).toEqual([]);
-      expect((await served(b)).length).toBe(1);
-      await expect(other.communityReports()).rejects.toThrow(/only an admin/i);
-      expect(await admin.communityReports()).toEqual([expect.objectContaining({
-        question: expect.objectContaining({ id: shared.id }), reasons: ["The apples are too hard for my child"],
+      const [mine] = await served(b);
+      expect(await b.flagQuestion({ questionId: mine.id, boxes: ["options"], note: "Two answers fit" })).toBe("own-review");
+      expect(await served(b)).toEqual([]);
+      expect(await b.ownQuestions()).toEqual([expect.objectContaining({
+        status: "review", shared: false, problems: [expect.stringContaining('You flagged it: Wrong options ("Two answers fit").')],
       })]);
-
-      await admin.moderateQuestion(shared.id, "keep");
-      expect((await served(other, true)).length).toBe(1);
-      expect(await admin.communityReports()).toEqual([]);
-
-      await other.reportQuestion(shared.id, "Still wrong");
-      await admin.moderateQuestion(shared.id, "remove");
-      expect(await served(other, true)).toEqual([]);
-      expect((await served(b)).length).toBe(1);
-      expect((await b.ownQuestions())[0].shared).toBe(false);
-      await expect(admin.moderateQuestion(shared.id, "keep")).rejects.toThrow("isn't in the community bank");
+      const admin = await w.admin();
+      expect(await admin.flagQueue()).toEqual([]);
     });
 
     it("keeps the community bank switch for each child, off until a parent turns it on", async () => {
@@ -457,6 +481,246 @@ export function accountContract(name: string, newWorld: () => Promise<ContractWo
       const admin = await w.admin();
       expect((await admin.questionRequests(5))[0]).toMatchObject({ topicId, by: "child", added: r.added, sentToReview: r.sentToReview });
       await expect(b.questionRequests()).rejects.toThrow(/only an admin/i);
+    });
+  });
+
+  describe(`${name}: question flags`, () => {
+    const taking = async (b: AccountBackend, profileId?: string) => (await b.questions(TAKING.topic.id, profileId ? { profileId } : {})).map(q => q.id);
+    const consenting = async (w: ContractWorld) => { const b = await w.family(); await b.giveConsent(V); return b; };
+    const flag = (b: AccountBackend, n: number, boxes: FlagRequest["boxes"], more: Partial<FlagRequest> = {}) => b.flagQuestion({ questionId: SUB(n), boxes, ...more });
+
+    it("hides a flagged question from the flagging family for a week, and starts the week again on another family's flag", async () => {
+      const w = await newWorld();
+      const a = await consenting(w);
+      const riya = await a.createProfile(RIYA);
+      const b = await consenting(w);
+      await expect(flag(a, 0, [])).rejects.toThrow("Tick at least one box.");
+      await expect(flag(a, 0, ["level"])).rejects.toThrow("too easy or too hard");
+      await expect(flag(a, 0, ["question"], { note: "x".repeat(301) })).rejects.toThrow("300 characters");
+      await expect(a.flagQuestion({ questionId: "no-such-question", boxes: ["question"] })).rejects.toThrow("isn't in Nitya's quizzes");
+      await expect(b.flagQuestion({ questionId: SUB(0), profileId: riya.id, boxes: ["question"] })).rejects.toThrow("isn't in this account");
+
+      expect(await flag(a, 0, ["explanation"], { profileId: riya.id, note: "The hint says add", answeredWrong: true, secondsAfterAnswer: 4 })).toBe("watching");
+      expect(await taking(a)).not.toContain(SUB(0));
+      expect(await taking(b)).toContain(SUB(0));
+      expect(await a.myFlags()).toEqual([expect.objectContaining({ question: expect.objectContaining({ id: SUB(0) }), boxes: ["explanation"], state: "watching", until: expect.any(String) })]);
+      expect(await b.myFlags()).toEqual([]);
+
+      await w.travel(6);
+      expect(await flag(b, 0, ["explanation"])).toBe("watching");
+      await w.travel(2);
+      expect(await taking(a)).not.toContain(SUB(0));
+      await w.travel(6);
+      expect(await taking(a)).toContain(SUB(0));
+      expect(await taking(b)).toContain(SUB(0));
+      expect((await a.myFlags())[0]).toMatchObject({ state: "back", until: null });
+    });
+
+    it("sends a question to review once three families flag it, and hides it for everyone only when it may teach something wrong", async () => {
+      const w = await newWorld();
+      const [f1, f2, f3, f4, f5] = [await consenting(w), await consenting(w), await consenting(w), await consenting(w), await consenting(w)];
+      const admin = await w.admin();
+      expect(await flag(f1, 1, ["level"], { levelDirection: "hard" })).toBe("watching");
+      expect(await flag(f2, 1, ["level"], { levelDirection: "hard" })).toBe("watching");
+      // The same family again is still one family.
+      expect(await flag(f2, 1, ["level"], { levelDirection: "hard" })).toBe("watching");
+      expect((await admin.flagQueue()).map(q => q.question.id)).not.toContain(SUB(1));
+      expect(await flag(f3, 1, ["level"], { levelDirection: "hard" })).toBe("review");
+      await expect(f1.flagQueue()).rejects.toThrow(/only an admin/i);
+      expect((await admin.flagQueue()).find(q => q.question.id === SUB(1))).toMatchObject({
+        community: false, hiddenForAll: false, boxes: { level: 3 }, levelDirections: { easy: 0, hard: 3 }, answerCheck: "agrees",
+      });
+      expect((await f1.myFlags())[0].state).toBe("review");
+      // A level flag leaves it in quizzes; a wrong options flag takes it out for everyone until the admin decides.
+      expect(await taking(f5)).toContain(SUB(1));
+      expect(await flag(f4, 1, ["options"])).toBe("review");
+      expect(await taking(f5)).not.toContain(SUB(1));
+      expect((await admin.flagQueue()).find(q => q.question.id === SUB(1))).toMatchObject({ hiddenForAll: true, boxes: { level: 3, options: 1 } });
+
+      await expect(admin.decideFlags(SUB(1), { kind: "level", level: 5 as never })).rejects.toThrow("level from 1 to 4");
+      await admin.decideFlags(SUB(1), { kind: "level", level: 2 });
+      const back = (await f5.questions(TAKING.topic.id)).find(q => q.id === SUB(1));
+      expect(back?.level).toBe(2);
+      expect(await taking(f1)).toContain(SUB(1));
+      expect((await f1.myFlags())[0].state).toBe("upheld");
+      expect((await admin.flagQueue()).map(q => q.question.id)).not.toContain(SUB(1));
+    });
+
+    it("sends a question to review at once for Not right for a child, hidden for everyone, and Keep brings it back", async () => {
+      const w = await newWorld();
+      const [f1, f2] = [await consenting(w), await consenting(w)];
+      const admin = await w.admin();
+      expect(await flag(f1, 2, ["safety"], { note: "Scary picture" })).toBe("review");
+      expect(await taking(f2)).not.toContain(SUB(2));
+      expect((await admin.flagQueue()).find(q => q.question.id === SUB(2))).toMatchObject({ hiddenForAll: true, boxes: { safety: 1 }, notes: ["Scary picture"] });
+      await admin.decideFlags(SUB(2), { kind: "keep" });
+      expect(await taking(f2)).toContain(SUB(2));
+      expect(await taking(f1)).toContain(SUB(2));
+      expect((await f1.myFlags())[0].state).toBe("dismissed");
+      await expect(admin.decideFlags(SUB(2), { kind: "keep" })).rejects.toThrow("isn't waiting for review");
+    });
+
+    it("fixes a flagged question, then finds the questions from its template to send to review", async () => {
+      const w = await newWorld();
+      const [f1, f2] = [await consenting(w), await consenting(w)];
+      const admin = await w.admin();
+      await flag(f1, 3, ["safety"]);
+      const entry = (await admin.flagQueue()).find(q => q.question.id === SUB(3))!;
+      const siblings = await admin.templateSiblings(SUB(3));
+      await expect(f1.templateSiblings(SUB(3))).rejects.toThrow(/only an admin/i);
+      expect(siblings.length).toBeGreaterThan(5);
+      expect(siblings.every(q => q.id !== SUB(3) && q.subSkill === entry.question.subSkill && q.level === entry.question.level)).toBe(true);
+
+      const fixed = applyEdits(entry.question, { ...editsOf(entry.question), explanation: "Count what is left after taking away." });
+      await admin.decideFlags(SUB(3), { kind: "fix", question: fixed, report: recheck(fixed, ALL_CONTENT.map(topicInfo)) });
+      expect((await f2.questions(TAKING.topic.id)).find(q => q.id === SUB(3))?.explanation).toBe("Count what is left after taking away.");
+      expect((await f1.myFlags())[0].state).toBe("upheld");
+
+      const sibling = siblings.find(q => q.id === SUB(4))!;
+      await admin.sendToReview([{ questionId: sibling.id, report: recheck(sibling, ALL_CONTENT.map(topicInfo)) }]);
+      expect(await taking(f2)).not.toContain(SUB(4));
+      expect((await admin.reviewQueue()).map(e => e.question.id)).toContain(SUB(4));
+      await admin.reviewQuestion(SUB(4), { decision: "approved" });
+      expect(await taking(f2)).toContain(SUB(4));
+    });
+
+    it("removes a flagged question from every quiz", async () => {
+      const w = await newWorld();
+      const [f1, f2] = [await consenting(w), await consenting(w)];
+      const admin = await w.admin();
+      await flag(f1, 5, ["options"], { note: "Two right answers" });
+      await flag(f2, 5, ["options"]);
+      await flag(await consenting(w), 5, ["question"]);
+      await admin.decideFlags(SUB(5), { kind: "remove" });
+      expect(await taking(f2)).not.toContain(SUB(5));
+      expect(await taking(await consenting(w))).not.toContain(SUB(5));
+      expect((await f1.myFlags())[0].state).toBe("upheld");
+    });
+
+    it("hides a young child's Something's wrong? tap from that child until a parent checks it", async () => {
+      const w = await newWorld();
+      const b = await consenting(w);
+      const riya = await b.createProfile(RIYA);
+      const kabir = await b.createProfile(KABIR);
+      const other = await consenting(w);
+      await b.suggestFlag(riya.id, SUB(6), true);
+      await b.suggestFlag(riya.id, SUB(6), true);
+      expect(await taking(b, riya.id)).not.toContain(SUB(6));
+      expect(await taking(b, kabir.id)).toContain(SUB(6));
+      expect(await b.flagChecks()).toEqual([{ profileId: riya.id, question: expect.objectContaining({ id: SUB(6) }), answeredWrong: true, suggestedAt: expect.any(String) }]);
+      expect(await other.flagChecks()).toEqual([]);
+      await expect(other.suggestFlag(riya.id, SUB(6), true)).rejects.toThrow("isn't in this account");
+      await expect(b.suggestFlag(riya.id, "no-such-question", null)).rejects.toThrow("isn't in Nitya's quizzes");
+
+      await b.dismissFlagCheck(riya.id, SUB(6));
+      expect(await taking(b, riya.id)).toContain(SUB(6));
+      expect(await b.flagChecks()).toEqual([]);
+
+      // The parent agrees: their flag answers the tap, and hides the question for the whole family.
+      await b.suggestFlag(riya.id, SUB(6), false);
+      await flag(b, 6, ["question"], { profileId: riya.id, answeredWrong: false });
+      expect(await b.flagChecks()).toEqual([]);
+      expect(await taking(b, kabir.id)).not.toContain(SUB(6));
+    });
+
+    it("turns 10 flags in a week into one Flagger check, keeps those questions for everyone else, and mutes a family found not helpful", async () => {
+      const w = await newWorld();
+      const heavy = await consenting(w);
+      await heavy.createProfile(RIYA);
+      const [f2, f3, f4] = [await consenting(w), await consenting(w), await consenting(w)];
+      const admin = await w.admin();
+      for (let n = 10; n < 20; n++) await flag(heavy, n, ["question"], { note: n === 10 ? "All wrong" : null, answeredWrong: n % 2 === 0, secondsAfterAnswer: 2 });
+      const [check, ...more] = await admin.flaggerChecks();
+      expect(more).toEqual([]);
+      expect(check).toMatchObject({
+        code: expect.stringMatching(/^F-[A-Z2-9]{4}$/), classes: ["UKG"], flagsThisWeek: 10, flagsTotal: 10, upheld: 0, dismissed: 0,
+        answeredWrong: 5, answered: 10, averageSeconds: 2, boxes: { question: 10 }, notes: ["All wrong"],
+      });
+      expect(check.accountAgeDays).toBe(0);
+      expect(check.questions.map(q => q.id).sort()).toEqual(Array.from({ length: 10 }, (_, i) => SUB(10 + i)).sort());
+      await expect(heavy.flaggerChecks()).rejects.toThrow(/only an admin/i);
+      expect(await taking(f4)).toContain(SUB(10));
+      expect((await taking(heavy)).filter(id => check.questions.some(q => q.id === id))).toEqual([]);
+
+      // Waiting on the check, the heavy flagger's flags don't count.
+      await flag(f2, 10, ["question"]);
+      expect(await flag(f3, 10, ["question"])).toBe("watching");
+
+      await expect(admin.revealFlagger(check.parentId, "why")).rejects.toThrow("Say in a sentence");
+      await expect(heavy.revealFlagger(check.parentId, "Checking whether this was meant to harm")).rejects.toThrow(/only an admin/i);
+      expect(await admin.revealFlagger(check.parentId, "Checking whether this was meant to harm")).toMatch(/@/);
+
+      await admin.decideFlagger(check.parentId, "not-helpful");
+      expect(await admin.flaggerChecks()).toEqual([]);
+      expect(await taking(heavy)).toContain(SUB(11));
+      expect((await heavy.myFlags()).filter(f => f.state === "dismissed").length).toBe(10);
+      // Muted: its next flags hide questions for itself, but don't count.
+      await flag(heavy, 20, ["question"]);
+      await flag(f2, 20, ["question"]);
+      expect(await flag(f3, 20, ["question"])).toBe("watching");
+      expect(await flag(f4, 20, ["question"])).toBe("review");
+    });
+
+    it("sends every question of a helpful Flagger check to review, with numbers the admin sets", async () => {
+      const w = await newWorld();
+      const admin = await w.admin();
+      const heavy = await consenting(w);
+      expect(await admin.flagSettings()).toEqual(DEFAULT_FLAG_SETTINGS);
+      await expect(heavy.flagSettings()).rejects.toThrow(/only an admin/i);
+      await expect(admin.saveFlagSettings({ ...DEFAULT_FLAG_SETTINGS, burstFlags: 4 })).rejects.toThrow("from 5 to 50");
+      await expect(heavy.saveFlagSettings({ ...DEFAULT_FLAG_SETTINGS, burstFlags: 5 })).rejects.toThrow(/only an admin/i);
+      await admin.saveFlagSettings({ ...DEFAULT_FLAG_SETTINGS, burstFlags: 5 });
+      expect((await admin.flagSettings()).burstFlags).toBe(5);
+
+      for (let n = 21; n < 26; n++) await flag(heavy, n, ["explanation"]);
+      const [check] = await admin.flaggerChecks();
+      await admin.decideFlagger(check.parentId, "helpful");
+      expect(await admin.flaggerChecks()).toEqual([]);
+      const queue = (await admin.flagQueue()).filter(q => q.question.id.startsWith(TAKING.topic.id));
+      expect(queue.map(q => q.question.id).sort()).toEqual([21, 22, 23, 24, 25].map(SUB).sort());
+      expect(queue.every(q => !q.hiddenForAll && q.flaggers[0].trust === 1.1)).toBe(true);
+      expect(await taking(await consenting(w))).toContain(SUB(21));
+    });
+
+    it("lets a family send a set number of flags a day", async () => {
+      const w = await newWorld();
+      const admin = await w.admin();
+      await admin.saveFlagSettings({ ...DEFAULT_FLAG_SETTINGS, dailyCap: 5, burstFlags: 50 });
+      const b = await consenting(w);
+      for (let n = 30; n < 35; n++) await flag(b, n, ["level"], { levelDirection: "easy" });
+      await expect(flag(b, 35, ["level"], { levelDirection: "easy" })).rejects.toThrow("up to 5 flags a day");
+      await w.travel(1.1);
+      expect(await flag(b, 35, ["level"], { levelDirection: "easy" })).toBe("watching");
+    });
+
+    it("counts what children answer as one more family: here 10 picking the same wrong choice", async () => {
+      const w = await newWorld();
+      const admin = await w.admin();
+      await admin.saveFlagSettings({ ...DEFAULT_FLAG_SETTINGS, minAnswers: 10, reviewFamilies: 2 });
+      const b = await consenting(w);
+      const riya = await b.createProfile(RIYA);
+      const q = TAKING.bank[40];
+      const wrong = q.options!.find(o => !q.answers.includes(o))!;
+      for (let i = 1; i <= 10; i++) {
+        const attemptId = crypto.randomUUID();
+        await b.startAttempt(riya.id, { id: attemptId, topicId: TAKING.topic.id, attemptNo: i, practice: true, startedAt: new Date().toISOString() });
+        await b.recordResponse({ attemptId, seq: 1, questionId: q.id, level: q.level, subSkill: q.subSkill, firstTryCorrect: false, retryCorrect: true, marksDelta: 0, firstAnswer: wrong });
+      }
+      expect((await admin.flagQueue()).map(x => x.question.id)).not.toContain(q.id);
+      expect(await flag(await consenting(w), 40, ["options"])).toBe("review");
+      const entry = (await admin.flagQueue()).find(x => x.question.id === q.id)!;
+      expect(entry).toMatchObject({ hiddenForAll: true, boxes: { options: 2, level: 1 }, levelDirections: { easy: 0, hard: 1 } });
+      expect(entry.signals).toEqual(expect.arrayContaining([`100% of children picked ${wrong} first.`, expect.stringContaining("0% of children got it right first time")]));
+      expect(entry.stats).toMatchObject({ shown: 10, firstTryRight: 0, retries: 10, retryRight: 10 });
+    });
+
+    it("keeps a family's flags counting after the family deletes its account", async () => {
+      const w = await newWorld();
+      const [f1, f2, f3] = [await consenting(w), await consenting(w), await consenting(w)];
+      await flag(f1, 45, ["question"]);
+      await flag(f2, 45, ["question"]);
+      await f1.deleteAccount();
+      expect(await flag(f3, 45, ["question"])).toBe("review");
     });
   });
 }

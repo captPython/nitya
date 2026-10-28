@@ -18,8 +18,10 @@ let n = 0;
 // One browser's storage holds a world: each parent gets their own key, and they share the bank.
 accountContract("the demo backend", async () => {
   const store = memory();
+  let offset = 0;
+  const now = () => new Date(Date.now() + offset);
   const signIn = async () => {
-    const b = localBackend(store, `family-${++n}`, "world-bank");
+    const b = localBackend(store, `family-${++n}`, "world-bank", now);
     await b.sendEmailLink(`parent${n}@example.com`);
     await b.openDemoLink!();
     return b;
@@ -31,6 +33,7 @@ accountContract("the demo backend", async () => {
       await b.setDemoAdmin!(true);
       return b;
     },
+    async travel(days) { offset += days * 864e5; },
   };
 });
 

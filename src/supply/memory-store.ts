@@ -1,5 +1,6 @@
 import type { Review } from "../admin/review";
 import { contentKey } from "../content/gen";
+import type { Level } from "../types";
 import type { CheckReport } from "../validation";
 import { planSave, resultOf } from "./plan";
 import type { CheckedQuestion, QuestionRequest, QuestionStore, SaveResult, SuppliedQuestion, TopicInfo } from "./types";
@@ -60,5 +61,30 @@ export class MemoryQuestionStore implements QuestionStore {
     } else {
       row.status = review.decision;
     }
+  }
+
+  /** The admin's decision on a flagged question, which stays approved unless it is removed. */
+  flagDecision(questionId: string, d: { kind: "level"; level: Level } | { kind: "fix"; question: SuppliedQuestion; report: CheckReport } | { kind: "remove" }) {
+    const row = this.rows.get(questionId);
+    if (!row || row.status !== "approved") throw new Error(`There is no question ${questionId}.`);
+    if (d.kind === "remove") { row.status = "rejected"; return; }
+    if (d.kind === "level") { Object.assign(row, { question: { ...row.question, level: d.level }, timesShown: 0, firstTryCorrect: 0 }); return; }
+    if (row.question.source === "csv") throw new Error("Fix CSV questions in the Drive file, so the next sync keeps the fix.");
+    const key = `${row.question.topicId}|${contentKey(d.question)}`;
+    for (const other of this.rows.values()) {
+      if (other !== row && `${other.question.topicId}|${contentKey(other.question)}` === key) {
+        throw new Error(`The bank already has this question (${other.question.id}).`);
+      }
+    }
+    Object.assign(row, { question: { ...d.question, id: row.question.id, topicId: row.question.topicId }, timesShown: 0, firstTryCorrect: 0 });
+    row.checks.push(d.report);
+  }
+
+  /** Puts an approved question back in the review queue, with the check run that sent it. */
+  sendToReview(questionId: string, report: CheckReport) {
+    const row = this.rows.get(questionId);
+    if (!row || row.status !== "approved") throw new Error(`Question ${questionId} isn't an approved question.`);
+    row.status = "in_review";
+    row.checks.push(report);
   }
 }
