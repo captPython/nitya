@@ -684,6 +684,15 @@ label.inline { font-weight: 400; }
 .pick input { width: 22px; height: 22px; accent-color: var(--blue); }
 /* The ticked answer is the admin's choice, not a verified one, so it is neutral, not green */
 .pick:has(input:checked) { border-color: var(--blue); background: var(--blue-soft); }
+/* Question flags: the boxes as one form, the child's quiet "Something's wrong?", and the admin's folding panels */
+.flagform { border: var(--bw-ghost) solid var(--line); border-radius: 16px; margin: 0; padding: 14px; min-width: 0; display: grid; gap: 10px; background: var(--card); }
+.flagform legend { padding: 0 4px; font-weight: var(--body-strong); }
+.flagform textarea { width: 100%; font: inherit; border: 2px solid var(--line); border-radius: 12px; padding: 10px; }
+.flagform .check { min-height: 44px; }
+.wrongrow { justify-content: center; }
+.wrongrow .ghost { min-height: 44px; }
+details.panel > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.qcard details summary, .panel details summary { cursor: pointer; color: var(--blue); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
 .sticky-save { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; background: var(--card); border-top: 1px solid var(--line-soft); }
 /* Phones: the playful owl is a little smaller and its speaker sits under it, so the question gets the bubble's full
    width; a long word problem is a size smaller. Both keep the answers above a 640px fold. */

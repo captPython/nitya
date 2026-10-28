@@ -19,3 +19,4 @@ export { NEW_QUESTIONS_PER_DAY } from "./server/new-questions";
 export {
   templateTopic, templateWorkbook, readTemplateFile, parseTemplate, checkUpload, TEMPLATE_FILE_NAME, OWN_SKILL, OWN_SKILL_NAME, MAX_UPLOAD_ROWS,
 } from "./supply/template";
+export { FLAG_BOXES, FLAG_BOX_TEXT, FLAG_SETTING_LIMITS, NOTE_MAX, cleanFlag, childFlagsDirectly, flagSettingsProblems, templateKey } from "./flags/rules";
